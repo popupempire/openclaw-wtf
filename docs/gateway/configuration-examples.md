@@ -45,6 +45,43 @@ Save to `~/.openclaw/openclaw.json` and you can DM the bot from that number.
 }
 ```
 
+### Solo Godmode (unrestricted personal assistant)
+
+For a **single-user personal assistant with full system access**. See [Solo Godmode](/gateway/solo-godmode) for security warnings and details.
+
+```json5
+{
+  identity: {
+    name: "Clawd",
+    theme: "helpful assistant",
+    emoji: "🦞",
+  },
+  agents: {
+    defaults: {
+      workspace: "~/.openclaw/workspace",
+      model: { primary: "anthropic/claude-sonnet-4-5" },
+      sandbox: {
+        mode: "off"  // No Docker sandboxing - tools run on host
+      },
+      elevatedDefault: "full"  // Auto-approve elevated commands (no prompts)
+    }
+  },
+  tools: {
+    exec: {
+      enabled: true,
+      elevated: true  // Enable sudo/admin commands
+    }
+  },
+  channels: {
+    whatsapp: {
+      allowFrom: ["+15555550123"],
+    },
+  },
+}
+```
+
+**⚠️ Security Warning:** This configuration gives your AI assistant unrestricted access to your system. Only use on a personal/isolated machine where you're the sole user.
+
 ## Expanded example (major options)
 
 > JSON5 lets you use comments and trailing commas. Regular JSON works too.

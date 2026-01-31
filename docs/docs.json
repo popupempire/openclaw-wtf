@@ -286,6 +286,22 @@
       "destination": "/gateway/sandboxing"
     },
     {
+      "source": "/solo-godmode",
+      "destination": "/gateway/solo-godmode"
+    },
+    {
+      "source": "/solo-godmode/",
+      "destination": "/gateway/solo-godmode"
+    },
+    {
+      "source": "/godmode",
+      "destination": "/gateway/solo-godmode"
+    },
+    {
+      "source": "/godmode/",
+      "destination": "/gateway/solo-godmode"
+    },
+    {
       "source": "/AGENTS.default",
       "destination": "/reference/AGENTS.default"
     },
@@ -979,6 +995,7 @@
           "security/formal-verification",
           "gateway/sandbox-vs-tool-policy-vs-elevated",
           "gateway/sandboxing",
+          "gateway/solo-godmode",
           "gateway/troubleshooting",
           "debugging",
           "gateway/remote",
