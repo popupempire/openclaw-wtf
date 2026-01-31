@@ -13,6 +13,10 @@ OpenClaw has three related (but different) controls:
 2. **Tool policy** (`tools.*`, `tools.sandbox.tools.*`, `agents.list[].tools.*`) decides **which tools are available/allowed**.
 3. **Elevated** (`tools.elevated.*`, `agents.list[].tools.elevated.*`) is an **exec-only escape hatch** to run on the host when you’re sandboxed.
 
+
+For a single-user unrestricted configuration that disables all three layers, see [Solo Godmode](/gateway/solo-godmode).
+
+For a single-user unrestricted configuration that disables all three layers, see [Solo Godmode](/gateway/solo-godmode).
 ## Quick debug
 
 Use the inspector to see what OpenClaw is _actually_ doing:
