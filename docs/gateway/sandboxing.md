@@ -36,7 +36,7 @@ Not sandboxed:
 
 `agents.defaults.sandbox.mode` controls **when** sandboxing is used:
 
-- `"off"`: no sandboxing.
+- `"off"`: no sandboxing (tools run directly on host). See [Solo Godmode](/gateway/solo-godmode) for a complete unrestricted configuration pattern.
 - `"non-main"`: sandbox only **non-main** sessions (default if you want normal chats on host).
 - `"all"`: every session runs in a sandbox.
   Note: `"non-main"` is based on `session.mainKey` (default `"main"`), not agent id.
