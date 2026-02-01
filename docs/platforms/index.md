@@ -18,6 +18,7 @@ Native companion apps for Windows are also planned; the Gateway is recommended v
 
 - macOS: [macOS](/platforms/macos)
 - iOS: [iOS](/platforms/ios)
+- iOS SSH (Blink Shell): [Blink Shell](/platforms/blink-shell)
 - Android: [Android](/platforms/android)
 - Windows: [Windows](/platforms/windows)
 - Linux: [Linux](/platforms/linux)

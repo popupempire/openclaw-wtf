@@ -460,6 +460,7 @@ Use these when you’re past the onboarding flow and want the deeper reference.
 - [macOS menu bar](https://docs.openclaw.ai/platforms/mac/menu-bar)
 - [macOS voice wake](https://docs.openclaw.ai/platforms/mac/voicewake)
 - [iOS node](https://docs.openclaw.ai/platforms/ios)
+- [iOS SSH (Blink Shell)](https://docs.openclaw.ai/platforms/blink-shell)
 - [Android node](https://docs.openclaw.ai/platforms/android)
 - [Windows (WSL2)](https://docs.openclaw.ai/platforms/windows)
 - [Linux app](https://docs.openclaw.ai/platforms/linux)
