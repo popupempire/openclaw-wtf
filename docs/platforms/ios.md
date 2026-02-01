@@ -99,8 +99,15 @@ openclaw nodes invoke --node "iOS Node" --command canvas.snapshot --params '{"ma
 - Pairing prompt never appears: run `openclaw nodes pending` and approve manually.
 - Reconnect fails after reinstall: the Keychain pairing token was cleared; re-pair the node.
 
+## SSH CLI access from iOS
+
+If you want to use OpenClaw CLI commands from your iOS device (using Blink Shell or another SSH client), see [Blink Shell guide](/platforms/blink-shell).
+
+This is separate from the iOS app—it's about running OpenClaw commands via SSH from your iPhone/iPad to a remote server.
+
 ## Related docs
 
+- [Blink Shell](/platforms/blink-shell) - CLI access from iOS via SSH
 - [Pairing](/gateway/pairing)
 - [Discovery](/gateway/discovery)
 - [Bonjour](/gateway/bonjour)

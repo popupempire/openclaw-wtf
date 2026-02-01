@@ -104,6 +104,7 @@ Tip: if you don’t have a global install yet, run repo commands via `pnpm openc
 - Nix: [Nix](/install/nix)
 - Ansible: [Ansible](/install/ansible)
 - Bun (CLI only): [Bun](/install/bun)
+- Blink Shell (iOS SSH): [Blink Shell](/platforms/blink-shell)
 
 ## After install
 
