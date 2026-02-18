@@ -14,9 +14,10 @@ Create an App Store Connect API key:
 Create `apps/ios/fastlane/.env` (gitignored):
 
 ```bash
-ASC_KEY_ID=YOUR_KEY_ID
+ASC_KEY_ID=YOUR_KEY_IDa  we
 ASC_ISSUER_ID=YOUR_ISSUER_ID
 ASC_KEY_PATH=/absolute/path/to/AuthKey_XXXXXXXXXX.p8
+
 
 # Code signing (Apple Team ID / App ID Prefix)
 IOS_DEVELOPMENT_TEAM=YOUR_TEAM_ID
