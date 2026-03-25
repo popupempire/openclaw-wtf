@@ -55,6 +55,8 @@ export type SlackActionConfig = {
   memberInfo?: boolean;
   channelInfo?: boolean;
   emojiList?: boolean;
+  /** Enable channel management actions (create, archive, rename, etc). Default: false. */
+  channels?: boolean;
 };
 
 export type SlackSlashCommandConfig = {

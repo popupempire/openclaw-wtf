@@ -54,6 +54,18 @@ export function createSlackActions(providerId: string): ChannelMessageActionAdap
       if (isActionEnabled("emojiList")) {
         actions.add("emoji-list");
       }
+      if (isActionEnabled("channelInfo")) {
+        actions.add("channel-info");
+        actions.add("channel-list");
+      }
+      if (isActionEnabled("channels", false)) {
+        actions.add("channel-create");
+        actions.add("channel-archive");
+        actions.add("channel-unarchive");
+        actions.add("channel-rename");
+        actions.add("channel-set-topic");
+        actions.add("channel-set-purpose");
+      }
       return Array.from(actions);
     },
     extractToolSend: ({ args }): ChannelToolSend | null => {
@@ -212,6 +224,104 @@ export function createSlackActions(providerId: string): ChannelMessageActionAdap
       if (action === "emoji-list") {
         return await handleSlackAction(
           { action: "emojiList", accountId: accountId ?? undefined },
+          cfg,
+        );
+      }
+
+      if (action === "channel-list") {
+        const types = readStringParam(params, "types");
+        const excludeArchived =
+          typeof params.excludeArchived === "boolean" ? params.excludeArchived : undefined;
+        const limit = readNumberParam(params, "limit", { integer: true });
+        return await handleSlackAction(
+          {
+            action: "channelList",
+            types,
+            excludeArchived,
+            limit,
+            accountId: accountId ?? undefined,
+          },
+          cfg,
+        );
+      }
+
+      if (action === "channel-info") {
+        return await handleSlackAction(
+          {
+            action: "channelInfo",
+            channelId: resolveChannelId(),
+            accountId: accountId ?? undefined,
+          },
+          cfg,
+        );
+      }
+
+      if (action === "channel-create") {
+        const name = readStringParam(params, "name", { required: true });
+        const isPrivate = typeof params.isPrivate === "boolean" ? params.isPrivate : undefined;
+        return await handleSlackAction(
+          { action: "channelCreate", name, isPrivate, accountId: accountId ?? undefined },
+          cfg,
+        );
+      }
+
+      if (action === "channel-archive") {
+        return await handleSlackAction(
+          {
+            action: "channelArchive",
+            channelId: resolveChannelId(),
+            accountId: accountId ?? undefined,
+          },
+          cfg,
+        );
+      }
+
+      if (action === "channel-unarchive") {
+        return await handleSlackAction(
+          {
+            action: "channelUnarchive",
+            channelId: resolveChannelId(),
+            accountId: accountId ?? undefined,
+          },
+          cfg,
+        );
+      }
+
+      if (action === "channel-rename") {
+        const name = readStringParam(params, "name", { required: true });
+        return await handleSlackAction(
+          {
+            action: "channelRename",
+            channelId: resolveChannelId(),
+            name,
+            accountId: accountId ?? undefined,
+          },
+          cfg,
+        );
+      }
+
+      if (action === "channel-set-topic") {
+        const topic = readStringParam(params, "topic", { required: true, allowEmpty: true });
+        return await handleSlackAction(
+          {
+            action: "channelSetTopic",
+            channelId: resolveChannelId(),
+            topic,
+            accountId: accountId ?? undefined,
+          },
+          cfg,
+        );
+      }
+
+      if (action === "channel-set-purpose") {
+        const purpose = readStringParam(params, "purpose", { required: true, allowEmpty: true });
+        return await handleSlackAction(
+          {
+            action: "channelSetPurpose",
+            channelId: resolveChannelId(),
+            purpose,
+            accountId: accountId ?? undefined,
+          },
           cfg,
         );
       }

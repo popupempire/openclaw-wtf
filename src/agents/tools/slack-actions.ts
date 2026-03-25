@@ -2,9 +2,13 @@ import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { OpenClawConfig } from "../../config/config.js";
 import { resolveSlackAccount } from "../../slack/accounts.js";
 import {
+  archiveSlackChannel,
+  createSlackChannel,
   deleteSlackMessage,
   editSlackMessage,
+  getSlackChannelInfo,
   getSlackMemberInfo,
+  listSlackChannels,
   listSlackEmojis,
   listSlackPins,
   listSlackReactions,
@@ -13,7 +17,11 @@ import {
   readSlackMessages,
   removeOwnSlackReactions,
   removeSlackReaction,
+  renameSlackChannel,
   sendSlackMessage,
+  setSlackChannelPurpose,
+  setSlackChannelTopic,
+  unarchiveSlackChannel,
   unpinSlackMessage,
 } from "../../slack/actions.js";
 import { parseSlackTarget, resolveSlackChannelId } from "../../slack/targets.js";
@@ -307,6 +315,91 @@ export async function handleSlackAction(
     }
     const emojis = readOpts ? await listSlackEmojis(readOpts) : await listSlackEmojis();
     return jsonResult({ ok: true, emojis });
+  }
+
+  if (action === "channelList") {
+    if (!isActionEnabled("channelInfo")) {
+      throw new Error("Slack channel info is disabled.");
+    }
+    const types = readStringParam(params, "types");
+    const excludeArchived =
+      typeof params.excludeArchived === "boolean" ? params.excludeArchived : undefined;
+    const limitRaw = params.limit;
+    const limit = typeof limitRaw === "number" && Number.isFinite(limitRaw) ? limitRaw : undefined;
+    const channels = await listSlackChannels({
+      ...readOpts,
+      types: types ?? undefined,
+      excludeArchived,
+      limit,
+    });
+    return jsonResult({ ok: true, channels });
+  }
+
+  if (action === "channelInfo") {
+    if (!isActionEnabled("channelInfo")) {
+      throw new Error("Slack channel info is disabled.");
+    }
+    const channelId = resolveChannelId();
+    const info = await getSlackChannelInfo(channelId, readOpts);
+    return jsonResult({ ok: true, info });
+  }
+
+  if (action === "channelCreate") {
+    if (!isActionEnabled("channels", false)) {
+      throw new Error("Slack channel management is disabled.");
+    }
+    const name = readStringParam(params, "name", { required: true });
+    const isPrivate = typeof params.isPrivate === "boolean" ? params.isPrivate : undefined;
+    const channel = await createSlackChannel(name, { ...writeOpts, isPrivate });
+    return jsonResult({ ok: true, channel });
+  }
+
+  if (action === "channelArchive") {
+    if (!isActionEnabled("channels", false)) {
+      throw new Error("Slack channel management is disabled.");
+    }
+    const channelId = resolveChannelId();
+    await archiveSlackChannel(channelId, writeOpts);
+    return jsonResult({ ok: true });
+  }
+
+  if (action === "channelUnarchive") {
+    if (!isActionEnabled("channels", false)) {
+      throw new Error("Slack channel management is disabled.");
+    }
+    const channelId = resolveChannelId();
+    await unarchiveSlackChannel(channelId, writeOpts);
+    return jsonResult({ ok: true });
+  }
+
+  if (action === "channelRename") {
+    if (!isActionEnabled("channels", false)) {
+      throw new Error("Slack channel management is disabled.");
+    }
+    const channelId = resolveChannelId();
+    const name = readStringParam(params, "name", { required: true });
+    const channel = await renameSlackChannel(channelId, name, writeOpts);
+    return jsonResult({ ok: true, channel });
+  }
+
+  if (action === "channelSetTopic") {
+    if (!isActionEnabled("channels", false)) {
+      throw new Error("Slack channel management is disabled.");
+    }
+    const channelId = resolveChannelId();
+    const topic = readStringParam(params, "topic", { required: true, allowEmpty: true });
+    await setSlackChannelTopic(channelId, topic, writeOpts);
+    return jsonResult({ ok: true });
+  }
+
+  if (action === "channelSetPurpose") {
+    if (!isActionEnabled("channels", false)) {
+      throw new Error("Slack channel management is disabled.");
+    }
+    const channelId = resolveChannelId();
+    const purpose = readStringParam(params, "purpose", { required: true, allowEmpty: true });
+    await setSlackChannelPurpose(channelId, purpose, writeOpts);
+    return jsonResult({ ok: true });
   }
 
   throw new Error(`Unknown action: ${action}`);

@@ -261,3 +261,204 @@ export async function listSlackPins(
   const result = await client.pins.list({ channel: channelId });
   return (result.items ?? []) as SlackPin[];
 }
+
+export type SlackChannelSummary = {
+  id: string;
+  name: string;
+  is_private?: boolean;
+  is_archived?: boolean;
+  topic?: string;
+  purpose?: string;
+  num_members?: number;
+  created?: number;
+};
+
+export type SlackChannelInfo = SlackChannelSummary & {
+  creator?: string;
+  is_member?: boolean;
+  is_general?: boolean;
+  last_read?: string;
+};
+
+export async function listSlackChannels(
+  opts: SlackActionClientOpts & {
+    types?: string;
+    excludeArchived?: boolean;
+    limit?: number;
+  } = {},
+): Promise<SlackChannelSummary[]> {
+  const client = await getClient(opts);
+  const channels: SlackChannelSummary[] = [];
+  let cursor: string | undefined;
+  const maxPages = 10;
+  let pages = 0;
+  const limit = opts.limit ?? 200;
+
+  do {
+    const result = await client.conversations.list({
+      types: opts.types ?? "public_channel,private_channel",
+      exclude_archived: opts.excludeArchived ?? false,
+      limit: Math.min(limit - channels.length, 1000),
+      cursor,
+    });
+
+    for (const channel of result.channels ?? []) {
+      if (channels.length >= limit) {
+        break;
+      }
+      const id = typeof channel.id === "string" ? channel.id : "";
+      const name = typeof channel.name === "string" ? channel.name : "";
+      if (!id || !name) {
+        continue;
+      }
+      channels.push({
+        id,
+        name,
+        is_private: channel.is_private ?? false,
+        is_archived: channel.is_archived ?? false,
+        topic:
+          channel.topic && typeof channel.topic === "object" && "value" in channel.topic
+            ? (channel.topic.value as string)
+            : undefined,
+        purpose:
+          channel.purpose && typeof channel.purpose === "object" && "value" in channel.purpose
+            ? (channel.purpose.value as string)
+            : undefined,
+        num_members: channel.num_members,
+        created: channel.created,
+      });
+    }
+
+    const next = result.response_metadata?.next_cursor?.trim();
+    cursor = next || undefined;
+    pages += 1;
+  } while (cursor && channels.length < limit && pages < maxPages);
+
+  return channels;
+}
+
+export async function getSlackChannelInfo(
+  channelId: string,
+  opts: SlackActionClientOpts = {},
+): Promise<SlackChannelInfo | null> {
+  const client = await getClient(opts);
+  const result = await client.conversations.info({ channel: channelId });
+  const channel = result.channel;
+  if (!channel) {
+    return null;
+  }
+  const id = typeof channel.id === "string" ? channel.id : "";
+  const name = typeof channel.name === "string" ? channel.name : "";
+  if (!id) {
+    return null;
+  }
+  return {
+    id,
+    name,
+    is_private: channel.is_private ?? false,
+    is_archived: channel.is_archived ?? false,
+    topic:
+      channel.topic && typeof channel.topic === "object" && "value" in channel.topic
+        ? (channel.topic.value as string)
+        : undefined,
+    purpose:
+      channel.purpose && typeof channel.purpose === "object" && "value" in channel.purpose
+        ? (channel.purpose.value as string)
+        : undefined,
+    num_members: channel.num_members,
+    created: channel.created,
+    creator: channel.creator,
+    is_member: channel.is_member,
+    is_general: channel.is_general,
+  };
+}
+
+export async function createSlackChannel(
+  name: string,
+  opts: SlackActionClientOpts & {
+    isPrivate?: boolean;
+  } = {},
+): Promise<SlackChannelInfo | null> {
+  const client = await getClient(opts);
+  const result = await client.conversations.create({
+    name,
+    is_private: opts.isPrivate ?? false,
+  });
+  const channel = result.channel;
+  if (!channel) {
+    return null;
+  }
+  const id = typeof channel.id === "string" ? channel.id : "";
+  const channelName = typeof channel.name === "string" ? channel.name : "";
+  if (!id) {
+    return null;
+  }
+  return {
+    id,
+    name: channelName,
+    is_private: channel.is_private ?? false,
+    is_archived: false,
+    creator: channel.creator,
+    is_member: channel.is_member,
+    created: channel.created,
+  };
+}
+
+export async function archiveSlackChannel(
+  channelId: string,
+  opts: SlackActionClientOpts = {},
+): Promise<void> {
+  const client = await getClient(opts);
+  await client.conversations.archive({ channel: channelId });
+}
+
+export async function unarchiveSlackChannel(
+  channelId: string,
+  opts: SlackActionClientOpts = {},
+): Promise<void> {
+  const client = await getClient(opts);
+  await client.conversations.unarchive({ channel: channelId });
+}
+
+export async function renameSlackChannel(
+  channelId: string,
+  name: string,
+  opts: SlackActionClientOpts = {},
+): Promise<SlackChannelInfo | null> {
+  const client = await getClient(opts);
+  const result = await client.conversations.rename({ channel: channelId, name });
+  const channel = result.channel;
+  if (!channel) {
+    return null;
+  }
+  const id = typeof channel.id === "string" ? channel.id : "";
+  const channelName = typeof channel.name === "string" ? channel.name : "";
+  if (!id) {
+    return null;
+  }
+  return {
+    id,
+    name: channelName,
+    is_private: channel.is_private ?? false,
+    is_archived: channel.is_archived ?? false,
+    created: channel.created,
+  };
+}
+
+export async function setSlackChannelTopic(
+  channelId: string,
+  topic: string,
+  opts: SlackActionClientOpts = {},
+): Promise<void> {
+  const client = await getClient(opts);
+  await client.conversations.setTopic({ channel: channelId, topic });
+}
+
+export async function setSlackChannelPurpose(
+  channelId: string,
+  purpose: string,
+  opts: SlackActionClientOpts = {},
+): Promise<void> {
+  const client = await getClient(opts);
+  await client.conversations.setPurpose({ channel: channelId, purpose });
+}
