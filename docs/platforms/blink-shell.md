@@ -10,6 +10,34 @@ read_when:
 
 [Blink Shell](https://blink.sh/) is a professional terminal app for iOS/iPadOS that provides full SSH access to remote servers. This guide shows how to install OpenClaw on a remote server and access it from Blink Shell on your iOS device.
 
+## What you can do
+
+With OpenClaw running on a remote server and Blink Shell on your iOS device, you can:
+
+**Core operations:**
+- **Chat with your AI assistant** using the CLI (`openclaw agent --message "..."`)
+- **Send messages to any channel** you've configured (WhatsApp, Telegram, Discord, Slack, etc.)
+- **Check gateway and channel health** to ensure everything is running
+- **View and manage logs** for troubleshooting
+- **Configure channels** (add/remove WhatsApp, Telegram, Discord, etc.)
+- **Update settings** and model preferences
+- **Monitor system status** and usage
+
+**Advanced capabilities:**
+- Run persistent sessions with tmux/screen (survive disconnections)
+- Forward the Gateway WebSocket to connect the OpenClaw iOS app
+- Execute cron jobs and automation tasks
+- Manage workspace and skills
+- Access browser tools and canvas features (when iOS app is connected)
+- Debug and troubleshoot with real-time logs
+
+**Real-world workflows:**
+- Ask the assistant questions from your iPhone: `openclaw agent --message "Summarize my email inbox" --thinking medium`
+- Send WhatsApp messages: `openclaw message send --to +1234567890 --message "Running late"`
+- Check if channels are online: `openclaw channels status --probe`
+- Monitor gateway health: `openclaw health && openclaw status --deep`
+- Review recent logs: `openclaw logs gateway --tail 100`
+
 ## Architecture overview
 
 When using Blink Shell with OpenClaw:
@@ -156,6 +184,155 @@ Send a test message:
 openclaw agent --message "Hello from Blink Shell!" --thinking low
 ```
 
+**You're all set!** The gateway is running on your server, and you can now use OpenClaw from Blink Shell.
+
+## Quick Start: First steps
+
+After installation, here's what to do first from Blink Shell:
+
+**1. Verify everything works:**
+```bash
+ssh user@your-server-host
+openclaw status
+openclaw health
+```
+
+**2. Try your first AI interaction:**
+```bash
+# Simple question
+openclaw agent --message "What can you help me with?" --thinking low
+
+# More complex task
+openclaw agent --message "Explain how OpenClaw works in simple terms" --thinking medium
+```
+
+**3. Set up a messaging channel (optional but recommended):**
+```bash
+# WhatsApp (easiest - shows QR code in terminal)
+openclaw channels configure whatsapp
+
+# After scanning QR code, verify it's connected:
+openclaw channels status
+```
+
+**4. Open the web dashboard (optional):**
+```bash
+openclaw dashboard
+# Opens http://127.0.0.1:18789 (you'll need to access via SSH tunnel or set bind to 'lan')
+```
+
+**5. Keep your session alive with tmux:**
+```bash
+# Install tmux if not present
+sudo apt install tmux
+
+# Start a named session
+tmux new -s openclaw
+
+# Now if you disconnect, your session stays alive
+# Reconnect later with: tmux attach -t openclaw
+```
+
+**Next steps:**
+- Configure more channels: [Channels guide](https://docs.openclaw.ai/channels)
+- Customize your assistant: [Agent configuration](https://docs.openclaw.ai/gateway/configuration)
+- Set up automation: [Cron jobs](https://docs.openclaw.ai/automation/cron-jobs)
+
+## How to operate OpenClaw from Blink Shell
+
+Once installed, OpenClaw runs as a background service on your server. Here's how to operate it from Blink Shell:
+
+### Daily workflow
+
+**1. Connect to your server:**
+```bash
+# From Blink Shell on your iPhone/iPad
+ssh user@your-server-host
+```
+
+**2. Check everything is running:**
+```bash
+openclaw status              # Quick status check
+openclaw health             # Detailed health report
+openclaw channels status    # See which channels are online
+```
+
+**3. Chat with your assistant:**
+```bash
+# Ask questions
+openclaw agent --message "What's on my calendar today?" --thinking medium
+
+# Get help with tasks
+openclaw agent --message "Write an email apologizing for missing the meeting" --thinking high
+
+# Quick queries
+openclaw agent --message "What's the weather in San Francisco?" --thinking low
+```
+
+**4. Send messages to channels:**
+```bash
+# WhatsApp
+openclaw message send --to +1234567890 --message "I'll be there in 10 minutes"
+
+# Use the dashboard for a web UI
+openclaw dashboard
+# Then open http://your-server-ip:18789 in iOS Safari
+```
+
+**5. View logs when troubleshooting:**
+```bash
+openclaw logs gateway --tail 100    # Last 100 lines
+openclaw logs gateway --follow      # Live tail
+```
+
+### Common operations
+
+**Restart the gateway:**
+```bash
+openclaw gateway stop
+openclaw gateway start
+# Or: openclaw gateway restart
+```
+
+**Update OpenClaw:**
+```bash
+npm update -g openclaw@latest
+openclaw doctor   # Check for issues after update
+```
+
+**Add a new channel:**
+```bash
+# WhatsApp (scan QR code in terminal)
+openclaw channels configure whatsapp
+
+# Telegram (you need a bot token)
+openclaw channels configure telegram --token "your-bot-token"
+
+# Discord (you need a bot token)
+openclaw channels configure discord --token "your-bot-token"
+```
+
+**Check channel status:**
+```bash
+openclaw channels status             # Quick status
+openclaw channels status --probe     # Detailed health check
+```
+
+**Manage configuration:**
+```bash
+openclaw config list                 # View all settings
+openclaw config get gateway          # View gateway settings
+openclaw config edit                 # Edit in terminal editor
+openclaw config set key.path value   # Set a specific value
+```
+
+**View help for any command:**
+```bash
+openclaw --help
+openclaw agent --help
+openclaw channels --help
+```
+
 ## Usage from Blink Shell
 
 ### Basic CLI commands
@@ -220,6 +397,80 @@ openclaw config set gateway.port 18789
 ```
 
 Configuration reference: [Config docs](https://docs.openclaw.ai/gateway/configuration)
+
+## Common use cases and examples
+
+Here are practical examples of what you can do with OpenClaw from Blink Shell on your iPhone:
+
+### Example 1: Get help with emails
+
+```bash
+openclaw agent --message "Draft a professional email declining a meeting request politely" --thinking high
+```
+
+### Example 2: Quick information lookup
+
+```bash
+openclaw agent --message "What's the capital of Japan and its population?" --thinking low
+```
+
+### Example 3: Send urgent WhatsApp message
+
+```bash
+# First, ensure WhatsApp is configured
+openclaw channels configure whatsapp
+
+# Send a message
+openclaw message send --to +1234567890 --message "Emergency - please call me ASAP"
+```
+
+### Example 4: Check system health before important tasks
+
+```bash
+openclaw health && openclaw channels status --probe
+```
+
+### Example 5: Research and summarization
+
+```bash
+openclaw agent --message "Research the latest developments in quantum computing and give me a summary" --thinking high
+```
+
+### Example 6: Automate daily standup
+
+```bash
+openclaw agent --message "Generate a standup update based on my recent activity" --thinking medium
+```
+
+### Example 7: Monitor gateway logs in real-time
+
+```bash
+# In a tmux session
+openclaw logs gateway --follow
+```
+
+### Example 8: Quick translation
+
+```bash
+openclaw agent --message "Translate 'How are you?' to Spanish, French, and German" --thinking low
+```
+
+### Example 9: Code assistance
+
+```bash
+openclaw agent --message "Write a Python function to calculate fibonacci numbers recursively" --thinking medium
+```
+
+### Example 10: Schedule a reminder
+
+```bash
+openclaw agent --message "Remind me via WhatsApp in 2 hours to check the server logs" --thinking medium
+```
+
+**Thinking levels explained:**
+- `--thinking low` (fast, simple queries)
+- `--thinking medium` (balanced speed and depth)
+- `--thinking high` (thorough, research-intensive tasks)
 
 ## Advanced: SSH tunneling
 
