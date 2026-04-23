@@ -1,0 +1,16 @@
+{
+  "_comment": "LLM Monitor — Cron Job Template. Copy this into your OpenClaw cron config or use 'openclaw cron add' to register it.",
+  "id": "llm-monitor-scan",
+  "label": "LLM Monitor Scan",
+  "schedule": {
+    "kind": "every",
+    "everyMs": 1800000,
+    "_comment_schedule": "1800000ms = 30 minutes. Adjust as needed."
+  },
+  "payload": {
+    "text": "Run LLM monitor scan: check all configured LLM interfaces for new conversations, extract gold insights, update the Knowledge Map, and notify me of all changes with full source traceability.",
+    "deliver": true,
+    "channel": "telegram",
+    "_comment_channel": "Change to 'discord', 'slack', 'whatsapp', etc. as needed."
+  }
+}

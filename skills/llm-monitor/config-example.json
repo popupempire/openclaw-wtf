@@ -1,0 +1,48 @@
+{
+  "_comment": "LLM Monitor configuration block. Merge this into your ~/.openclaw/config.json",
+  "llmMonitor": {
+    "enabled": true,
+    "pollIntervalMinutes": 30,
+    "notifyChannel": "telegram",
+    "goldThreshold": 0.75,
+    "interfaces": [
+      {
+        "id": "chatgpt",
+        "label": "ChatGPT",
+        "kind": "openai",
+        "_comment_apiKey": "Use env var: set OPENAI_API_KEY in your environment, or use the 1password skill.",
+        "apiKey": "${OPENAI_API_KEY}",
+        "model": "gpt-4o",
+        "_comment_endpoint": "Optional: override with a custom OpenAI-compatible endpoint or Assistants threads URL.",
+        "endpoint": "https://api.openai.com/v1/threads"
+      },
+      {
+        "id": "claude",
+        "label": "Claude",
+        "kind": "anthropic",
+        "apiKey": "${ANTHROPIC_API_KEY}",
+        "model": "claude-opus-4-5",
+        "_comment_endpoint": "Required for Anthropic: point to a local proxy or conversation export endpoint.",
+        "endpoint": "http://localhost:9090/anthropic/conversations"
+      },
+      {
+        "id": "gemini",
+        "label": "Gemini",
+        "kind": "gemini",
+        "apiKey": "${GEMINI_API_KEY}",
+        "model": "gemini-2.5-flash",
+        "_comment_endpoint": "Required for Gemini: point to a local proxy or conversation export endpoint.",
+        "endpoint": "http://localhost:9090/gemini/conversations"
+      },
+      {
+        "_comment": "Example of a custom LLM interface (e.g., a local Ollama instance with a conversation log API)",
+        "id": "ollama-local",
+        "label": "Ollama (Local)",
+        "kind": "custom",
+        "apiKey": "",
+        "model": "llama3.2",
+        "endpoint": "http://localhost:11434/api/conversations"
+      }
+    ]
+  }
+}
