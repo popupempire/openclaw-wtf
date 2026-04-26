@@ -3,6 +3,14 @@
  *
  * Shared type definitions for the Knowledge Map Monitor extension.
  * All data flowing through the pipeline is typed here for strict safety.
+ *
+ * Enhanced in v1.1.0:
+ *   - Extended ConversationSource to enumerate all supported LLM interfaces.
+ *   - Added SyncRecord to track cross-LLM synchronisation events.
+ *   - Added KmAuditEvent for full change-log traceability.
+ *   - Extended KmChangeNotification with per-source breakdown and audit trail.
+ *   - Extended MonitorState with cycleCount and per-source statistics.
+ *   - Extended Provenance with extractionModel and rawConfidence fields.
  */
 
 // ---------------------------------------------------------------------------
@@ -25,15 +33,39 @@ export interface ConversationRecord {
   metadata?: Record<string, unknown>;
 }
 
-/** Enumeration of supported LLM interface sources. */
+/**
+ * Enumeration of supported LLM interface sources.
+ * String union allows arbitrary source identifiers for custom adapters.
+ */
 export type ConversationSource =
   | "openai-chatgpt"
   | "anthropic-claude"
   | "google-gemini"
   | "mistral"
+  | "meta-llama"
+  | "cohere"
   | "openclaw-session"
   | "custom-webhook"
   | string;
+
+/**
+ * Synchronisation record: tracks when a conversation from one LLM interface
+ * was detected and integrated into the km-monitor pipeline.
+ */
+export interface SyncRecord {
+  /** Unique identifier for this sync event. */
+  id: string;
+  /** The source adapter that produced the conversation. */
+  source: ConversationSource;
+  /** The conversation ID that was synchronised. */
+  conversationId: string;
+  /** ISO-8601 timestamp of synchronisation. */
+  syncedAt: string;
+  /** Number of gold entries produced from this conversation. */
+  goldExtracted: number;
+  /** Whether the sync was a dry run (no writes). */
+  dryRun: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // Knowledge Map (KM) Enrichment
@@ -69,11 +101,52 @@ export interface Provenance {
   extractedBy: string;
   /** ISO-8601 timestamp of extraction. */
   extractedAt: string;
+  /** Optional: model name used for extraction (e.g., "gpt-4.1-mini"). */
+  extractionModel?: string;
+  /** Optional: raw LLM confidence score before threshold filtering. */
+  rawConfidence?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Audit Trail
+// ---------------------------------------------------------------------------
+
+/**
+ * An immutable audit event recording every change to the Knowledge Map.
+ * Appended to the audit log on every write, enabling full change-log traceability.
+ */
+export interface KmAuditEvent {
+  /** Discriminator for the event type. */
+  kind: "km-audit";
+  /** ISO-8601 timestamp of the event. */
+  timestamp: string;
+  /** The action performed. */
+  action: "add" | "skip-duplicate" | "skip-low-confidence" | "scan-error";
+  /** ID of the affected GoldEntry (if applicable). */
+  entryId?: string;
+  /** Title of the affected GoldEntry (if applicable). */
+  entryTitle?: string;
+  /** Source of the conversation that triggered the event. */
+  source: ConversationSource;
+  /** Conversation ID that triggered the event. */
+  conversationId: string;
+  /** Additional detail for error events. */
+  detail?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Notifications
 // ---------------------------------------------------------------------------
+
+/** Per-source summary included in change notifications. */
+export interface SourceSummary {
+  /** The LLM interface source. */
+  source: ConversationSource;
+  /** Number of new conversations detected from this source. */
+  conversationsDetected: number;
+  /** Number of gold entries extracted from this source. */
+  goldExtracted: number;
+}
 
 /** Notification payload dispatched when the KM changes. */
 export interface KmChangeNotification {
@@ -85,8 +158,14 @@ export interface KmChangeNotification {
   newEntriesCount: number;
   /** The entries themselves, for inline display. */
   entries: GoldEntry[];
+  /** Per-source breakdown for this cycle. */
+  sourceSummaries: SourceSummary[];
+  /** Any adapter errors encountered during this cycle. */
+  scanErrors: Array<{ adapter: string; error: string }>;
   /** ISO-8601 timestamp of the notification. */
   notifiedAt: string;
+  /** Cycle sequence number (monotonically increasing). */
+  cycleNumber: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,4 +182,8 @@ export interface MonitorState {
   totalGoldAdded: number;
   /** ISO-8601 timestamp of the last successful scan cycle. */
   lastScanAt: string | null;
+  /** Monotonically increasing cycle counter. */
+  cycleCount: number;
+  /** Per-source statistics for observability. */
+  sourceStats: Record<string, { processed: number; goldAdded: number }>;
 }

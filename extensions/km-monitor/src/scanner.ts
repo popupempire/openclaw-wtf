@@ -7,6 +7,13 @@
  * Each "adapter" is a lightweight async function that fetches the latest
  * conversations from a specific source. Adapters are pluggable: add a new
  * function and register it in `createAdapters()`.
+ *
+ * Enhanced in v1.1.0:
+ *   - Added explicit named adapters for ChatGPT, Claude, Gemini, Mistral, and Meta Llama.
+ *     These read from source-specific sub-buffers, enabling per-source deduplication.
+ *   - Added `createAllAdapters()` factory for full multi-LLM coverage.
+ *   - Added `ADAPTER_DISPLAY_NAMES` map for human-readable source labels.
+ *   - Extracted `readAndClearBuffer()` helper to reduce duplication.
  */
 
 import type { ConversationRecord, ConversationSource } from "./types.js";
@@ -17,16 +24,28 @@ import type { MonitorState } from "./types.js";
 // ---------------------------------------------------------------------------
 
 export interface ConversationAdapter {
-  /** Human-readable name for logging. */
+  /** Human-readable name for logging and notifications. */
   name: string;
-  /** The source identifier this adapter covers. */
+  /** The source identifier used in ConversationRecord.source. */
   source: ConversationSource;
   /**
-   * Fetch the latest conversations from this source.
-   * Returns an empty array if nothing new is available.
+   * Fetch the latest conversations from this LLM interface.
+   * @param sinceId - If provided, only return conversations with id > sinceId.
    */
   fetchLatest(sinceId?: string): Promise<ConversationRecord[]>;
 }
+
+/** Human-readable display names for well-known sources. */
+export const ADAPTER_DISPLAY_NAMES: Record<string, string> = {
+  "openai-chatgpt": "OpenAI ChatGPT",
+  "anthropic-claude": "Anthropic Claude",
+  "google-gemini": "Google Gemini",
+  "mistral": "Mistral AI",
+  "meta-llama": "Meta Llama",
+  "cohere": "Cohere",
+  "openclaw-session": "OpenClaw Session",
+  "custom-webhook": "Custom Webhook",
+};
 
 // ---------------------------------------------------------------------------
 // Built-in Adapters
@@ -95,15 +114,50 @@ export function createOpenClawSessionAdapter(): ConversationAdapter {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Webhook Buffer Helper
+// ---------------------------------------------------------------------------
+
 /**
- * Custom Webhook Adapter
+ * Read and consume NDJSON records from a buffer file.
+ * Returns all records with id > sinceId (if provided), and clears consumed
+ * lines from the buffer file to prevent re-processing.
+ */
+async function readAndClearBuffer(
+  bufferPath: string,
+  sinceId?: string,
+): Promise<ConversationRecord[]> {
+  const { existsSync, readFileSync, writeFileSync } = await import("node:fs");
+  if (!existsSync(bufferPath)) return [];
+  const lines = readFileSync(bufferPath, "utf-8").split("\n").filter(Boolean);
+  const entries: ConversationRecord[] = [];
+  const consumed: string[] = [];
+  for (const line of lines) {
+    try {
+      const record = JSON.parse(line) as ConversationRecord;
+      if (sinceId && record.id <= sinceId) continue;
+      entries.push(record);
+      consumed.push(line);
+    } catch {
+      // Malformed line — skip.
+    }
+  }
+  // Clear consumed entries from the buffer.
+  if (consumed.length > 0) {
+    const remaining = lines.filter((l) => !consumed.includes(l)).join("\n");
+    writeFileSync(bufferPath, remaining ? remaining + "\n" : "", "utf-8");
+  }
+  return entries;
+}
+
+/**
+ * Custom Webhook Adapter (generic catch-all)
  *
- * Reads conversations from a local webhook buffer file written by an external
- * process (e.g., a small Express server that receives POST payloads from
- * ChatGPT, Claude.ai, or any other LLM interface via browser extension or
- * API hook). The buffer file is a newline-delimited JSON file.
+ * Reads conversations from the generic webhook buffer file written by the
+ * webhook server (`src/webhook-server.ts`). Handles payloads from any LLM
+ * interface that does not have a dedicated named adapter.
  *
- * Buffer file path: `~/.openclaw/km-monitor/webhook-buffer.ndjson`
+ * Buffer file: `~/.openclaw/km-monitor/webhook-buffer.ndjson`
  * (override with `KM_MONITOR_WEBHOOK_BUFFER` env var)
  */
 export function createWebhookBufferAdapter(): ConversationAdapter {
@@ -111,47 +165,102 @@ export function createWebhookBufferAdapter(): ConversationAdapter {
     name: "Webhook Buffer Adapter",
     source: "custom-webhook",
     async fetchLatest(sinceId?: string): Promise<ConversationRecord[]> {
-      const { existsSync, readFileSync, writeFileSync } = await import(
-        "node:fs"
-      );
       const { join } = await import("node:path");
-
       const home = process.env.HOME ?? "/tmp";
       const bufferPath =
         process.env.KM_MONITOR_WEBHOOK_BUFFER ??
         join(home, ".openclaw", "km-monitor", "webhook-buffer.ndjson");
-
-      if (!existsSync(bufferPath)) return [];
-
-      const lines = readFileSync(bufferPath, "utf-8")
-        .split("\n")
-        .filter(Boolean);
-
-      const entries: ConversationRecord[] = [];
-      const consumed: string[] = [];
-
-      for (const line of lines) {
-        try {
-          const record = JSON.parse(line) as ConversationRecord;
-          if (sinceId && record.id <= sinceId) continue;
-          entries.push(record);
-          consumed.push(line);
-        } catch {
-          // Malformed line — skip.
-        }
-      }
-
-      // Clear consumed entries from the buffer.
-      if (consumed.length > 0) {
-        const remaining = lines
-          .filter((l) => !consumed.includes(l))
-          .join("\n");
-        writeFileSync(bufferPath, remaining ? remaining + "\n" : "", "utf-8");
-      }
-
-      return entries;
+      return readAndClearBuffer(bufferPath, sinceId);
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Named LLM Adapters (source-specific webhook sub-buffers)
+// ---------------------------------------------------------------------------
+
+/**
+ * Factory for creating a named LLM adapter that reads from a source-specific
+ * sub-buffer file under the KM directory.
+ *
+ * The webhook server routes payloads to source-specific buffers when the
+ * `source` field in the payload matches a known LLM interface name, enabling
+ * per-source deduplication and traceability.
+ *
+ * Buffer file: `~/.openclaw/km-monitor/buffer-<source>.ndjson`
+ */
+function createNamedLlmAdapter(
+  adapterName: string,
+  source: ConversationSource,
+): ConversationAdapter {
+  return {
+    name: adapterName,
+    source,
+    async fetchLatest(sinceId?: string): Promise<ConversationRecord[]> {
+      const { join } = await import("node:path");
+      const home = process.env.HOME ?? "/tmp";
+      const kmDir =
+        process.env.KM_MONITOR_KM_DIR ??
+        join(home, ".openclaw", "km-monitor");
+      const bufferPath = join(kmDir, `buffer-${source}.ndjson`);
+      return readAndClearBuffer(bufferPath, sinceId);
+    },
+  };
+}
+
+/**
+ * ChatGPT Adapter
+ *
+ * Monitors conversations pushed from OpenAI ChatGPT via the webhook server.
+ * Configure your browser extension or API hook to POST to
+ * `http://localhost:7842/ingest` with `"source": "openai-chatgpt"`.
+ */
+export function createChatGPTAdapter(): ConversationAdapter {
+  return createNamedLlmAdapter("ChatGPT Adapter", "openai-chatgpt");
+}
+
+/**
+ * Claude Adapter
+ *
+ * Monitors conversations pushed from Anthropic Claude via the webhook server.
+ * Configure your browser extension or API hook to POST to
+ * `http://localhost:7842/ingest` with `"source": "anthropic-claude"`.
+ */
+export function createClaudeAdapter(): ConversationAdapter {
+  return createNamedLlmAdapter("Claude Adapter", "anthropic-claude");
+}
+
+/**
+ * Gemini Adapter
+ *
+ * Monitors conversations pushed from Google Gemini via the webhook server.
+ * Configure your browser extension or API hook to POST to
+ * `http://localhost:7842/ingest` with `"source": "google-gemini"`.
+ */
+export function createGeminiAdapter(): ConversationAdapter {
+  return createNamedLlmAdapter("Gemini Adapter", "google-gemini");
+}
+
+/**
+ * Mistral Adapter
+ *
+ * Monitors conversations pushed from Mistral AI via the webhook server.
+ * Configure your browser extension or API hook to POST to
+ * `http://localhost:7842/ingest` with `"source": "mistral"`.
+ */
+export function createMistralAdapter(): ConversationAdapter {
+  return createNamedLlmAdapter("Mistral Adapter", "mistral");
+}
+
+/**
+ * Meta Llama Adapter
+ *
+ * Monitors conversations pushed from Meta Llama interfaces via the webhook server.
+ * Configure your browser extension or API hook to POST to
+ * `http://localhost:7842/ingest` with `"source": "meta-llama"`.
+ */
+export function createMetaLlamaAdapter(): ConversationAdapter {
+  return createNamedLlmAdapter("Meta Llama Adapter", "meta-llama");
 }
 
 // ---------------------------------------------------------------------------
@@ -197,7 +306,28 @@ export async function runScanCycle(
   };
 }
 
-/** Factory: create the default set of adapters. */
+/**
+ * Factory: create the default set of adapters.
+ * Includes OpenClaw sessions and the generic webhook buffer.
+ */
 export function createAdapters(): ConversationAdapter[] {
   return [createOpenClawSessionAdapter(), createWebhookBufferAdapter()];
+}
+
+/**
+ * Factory: create the full set of adapters including all named LLM interfaces.
+ * Use this when you want per-source deduplication and traceability for
+ * ChatGPT, Claude, Gemini, Mistral, and Meta Llama conversations.
+ * Set `KM_MONITOR_ALL_ADAPTERS=1` to activate this set automatically.
+ */
+export function createAllAdapters(): ConversationAdapter[] {
+  return [
+    createOpenClawSessionAdapter(),
+    createChatGPTAdapter(),
+    createClaudeAdapter(),
+    createGeminiAdapter(),
+    createMistralAdapter(),
+    createMetaLlamaAdapter(),
+    createWebhookBufferAdapter(), // catch-all for unknown sources
+  ];
 }

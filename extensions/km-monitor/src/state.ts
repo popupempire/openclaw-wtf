@@ -4,6 +4,11 @@
  * Lightweight JSON-file-backed state store for the monitor loop.
  * Persists the "last seen" conversation IDs so the agent never re-processes
  * a conversation it has already ingested, even across restarts.
+ *
+ * Enhanced in v1.1.0:
+ *   - Added cycleCount for monotonic cycle numbering.
+ *   - Added sourceStats for per-source observability.
+ *   - Backward-compatible loading: merges with defaults for old state files.
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
@@ -15,6 +20,8 @@ const DEFAULT_STATE: MonitorState = {
   totalProcessed: 0,
   totalGoldAdded: 0,
   lastScanAt: null,
+  cycleCount: 0,
+  sourceStats: {},
 };
 
 /**
@@ -34,14 +41,22 @@ function resolveStatePath(): string {
 export function loadState(): MonitorState {
   const path = resolveStatePath();
   if (!existsSync(path)) {
-    return { ...DEFAULT_STATE, lastSeenIds: {} };
+    return { ...DEFAULT_STATE, lastSeenIds: {}, sourceStats: {} };
   }
   try {
     const raw = readFileSync(path, "utf-8");
-    return JSON.parse(raw) as MonitorState;
+    const parsed = JSON.parse(raw) as Partial<MonitorState>;
+    // Merge with defaults to handle state files written by older versions
+    // that lack the cycleCount and sourceStats fields.
+    return {
+      ...DEFAULT_STATE,
+      ...parsed,
+      lastSeenIds: parsed.lastSeenIds ?? {},
+      sourceStats: parsed.sourceStats ?? {},
+    };
   } catch {
     console.warn("[km-monitor] Failed to parse state file; starting fresh.");
-    return { ...DEFAULT_STATE, lastSeenIds: {} };
+    return { ...DEFAULT_STATE, lastSeenIds: {}, sourceStats: {} };
   }
 }
 
@@ -64,5 +79,27 @@ export function markSeen(
   return {
     ...state,
     lastSeenIds: { ...state.lastSeenIds, [source]: conversationId },
+  };
+}
+
+/**
+ * Increment per-source statistics in the state.
+ * Called after each conversation is processed.
+ */
+export function incrementSourceStats(
+  state: MonitorState,
+  source: string,
+  goldAdded: number,
+): MonitorState {
+  const existing = state.sourceStats[source] ?? { processed: 0, goldAdded: 0 };
+  return {
+    ...state,
+    sourceStats: {
+      ...state.sourceStats,
+      [source]: {
+        processed: existing.processed + 1,
+        goldAdded: existing.goldAdded + goldAdded,
+      },
+    },
   };
 }
