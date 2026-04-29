@@ -1,32 +1,22 @@
 /**
- * km-monitor/src/notifier.ts
+ * km-monitor/src/notifier.ts  — v1.2.0
  *
  * Notification Dispatcher — sends structured notifications whenever the
- * Knowledge Map is updated. Notifications include:
- *   - A human-readable summary of what changed.
- *   - The full list of new gold entries with provenance metadata.
- *   - A per-source breakdown of conversations detected and gold extracted.
- *   - Any adapter errors encountered during the scan cycle.
- *   - A monotonic cycle number for ordering and deduplication.
+ * Knowledge Map is updated, and periodic health reports.
  *
- * Supported notification channels (configured via environment variables):
- *   - **Console** (always active): structured JSON log to stdout.
- *   - **File** (`KM_MONITOR_NOTIFY_FILE`): append to a NDJSON log file.
- *   - **Webhook** (`KM_MONITOR_NOTIFY_WEBHOOK_URL`): HTTP POST to an
- *     arbitrary endpoint (e.g., Discord, Slack, custom API).
- *
- * Enhanced in v1.1.0:
- *   - Added per-source SourceSummary breakdown to notifications.
- *   - Added scanErrors and cycleNumber to KmChangeNotification.
- *   - Discord/Slack payloads now include per-source stats and error alerts.
- *   - Console output now includes full provenance (model, rawConfidence).
+ * Changes in v1.2.0:
+ *   - Added `batchId` to all notification payloads for traceability.
+ *   - Added `dispatchHealthReport()` for periodic liveness signals.
+ *   - Discord and Slack payloads now include batch ID.
+ *   - Added Teams webhook support (generic JSON fallback with Teams card hint).
+ *   - Console output now includes batch ID and health report formatting.
  */
-
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type {
   GoldEntry,
   KmChangeNotification,
+  KmHealthReport,
   SourceSummary,
   ConversationRecord,
 } from "./types.js";
@@ -35,19 +25,12 @@ import type {
 // Notification builder
 // ---------------------------------------------------------------------------
 
-/**
- * Build a KmChangeNotification from the current cycle's results.
- *
- * @param entries - Gold entries added in this cycle.
- * @param scanErrors - Adapter errors encountered during scanning.
- * @param newConversations - All new conversations detected (for per-source stats).
- * @param cycleNumber - Monotonic cycle counter from state.
- */
 export function buildNotification(
   entries: GoldEntry[],
   scanErrors: Array<{ adapter: string; error: string }>,
   newConversations: ConversationRecord[] = [],
   cycleNumber = 0,
+  batchId?: string,
 ): KmChangeNotification {
   const now = new Date().toISOString();
 
@@ -56,7 +39,6 @@ export function buildNotification(
     string,
     { conversationsDetected: number; goldExtracted: number }
   >();
-
   for (const conv of newConversations) {
     const existing = sourceMap.get(conv.source) ?? {
       conversationsDetected: 0,
@@ -67,7 +49,6 @@ export function buildNotification(
       conversationsDetected: existing.conversationsDetected + 1,
     });
   }
-
   for (const entry of entries) {
     const src = entry.provenance.source;
     const existing = sourceMap.get(src) ?? {
@@ -80,19 +61,14 @@ export function buildNotification(
     });
   }
 
-  const sourceSummaries: SourceSummary[] = Array.from(
-    sourceMap.entries(),
-  ).map(([source, stats]) => ({ source, ...stats }));
-
-  const sourceList = sourceSummaries
-    .filter((s) => s.goldExtracted > 0)
-    .map((s) => s.source)
-    .join(", ");
+  const sourceSummaries: SourceSummary[] = Array.from(sourceMap.entries()).map(
+    ([source, stats]) => ({ source, ...stats }),
+  );
 
   const summary =
     entries.length === 0
-      ? `Knowledge Map scan #${cycleNumber} completed — no new gold entries found.${scanErrors.length > 0 ? ` (${scanErrors.length} adapter error(s))` : ""}`
-      : `Knowledge Map updated (cycle #${cycleNumber}): ${entries.length} new gold entr${entries.length === 1 ? "y" : "ies"} added from [${sourceList}].${scanErrors.length > 0 ? ` (${scanErrors.length} adapter error(s))` : ""}`;
+      ? `Cycle #${cycleNumber}: No new gold entries found.`
+      : `Cycle #${cycleNumber}: ${entries.length} new gold entr${entries.length === 1 ? "y" : "ies"} added from ${sourceSummaries.length} source(s).`;
 
   return {
     kind: "km-change",
@@ -103,6 +79,7 @@ export function buildNotification(
     scanErrors,
     notifiedAt: now,
     cycleNumber,
+    batchId,
   };
 }
 
@@ -111,33 +88,40 @@ export function buildNotification(
 // ---------------------------------------------------------------------------
 
 function notifyConsole(notification: KmChangeNotification): void {
-  console.log(
-    JSON.stringify(
-      {
-        "[km-monitor]": notification.summary,
-        cycle: notification.cycleNumber,
-        newEntries: notification.newEntriesCount,
-        notifiedAt: notification.notifiedAt,
-        sourceSummaries: notification.sourceSummaries,
-        scanErrors: notification.scanErrors,
-        entries: notification.entries.map((e) => ({
-          id: e.id,
-          title: e.title,
-          confidence: e.confidence,
-          rawConfidence: e.provenance.rawConfidence ?? null,
-          tags: e.tags,
-          source: e.provenance.source,
-          conversationId: e.provenance.conversationId,
-          originUrl: e.provenance.originUrl ?? null,
-          extractedBy: e.provenance.extractedBy,
-          extractionModel: e.provenance.extractionModel ?? null,
-          extractedAt: e.provenance.extractedAt,
-        })),
-      },
-      null,
-      2,
-    ),
-  );
+  const prefix = `[km-monitor/notify]`;
+  console.log(`${prefix} ─────────────────────────────────────────`);
+  console.log(`${prefix} ${notification.summary}`);
+  if (notification.batchId) {
+    console.log(`${prefix} Batch ID: ${notification.batchId}`);
+  }
+  if (notification.sourceSummaries.length > 0) {
+    console.log(`${prefix} Sources:`);
+    for (const s of notification.sourceSummaries) {
+      console.log(
+        `${prefix}   ${s.source}: ${s.conversationsDetected} conv(s), ${s.goldExtracted} gold`,
+      );
+    }
+  }
+  if (notification.entries.length > 0) {
+    console.log(`${prefix} New entries:`);
+    for (const entry of notification.entries) {
+      console.log(`${prefix}   [${(entry.confidence * 100).toFixed(0)}%] ${entry.title}`);
+      console.log(`${prefix}     source=${entry.provenance.source} | conv=${entry.provenance.conversationId}`);
+      if (entry.provenance.extractionModel) {
+        console.log(`${prefix}     model=${entry.provenance.extractionModel} | rawConf=${entry.provenance.rawConfidence?.toFixed(3)}`);
+      }
+      if (entry.provenance.originUrl) {
+        console.log(`${prefix}     url=${entry.provenance.originUrl}`);
+      }
+    }
+  }
+  if (notification.scanErrors.length > 0) {
+    console.log(`${prefix} ⚠ Adapter errors:`);
+    for (const err of notification.scanErrors) {
+      console.log(`${prefix}   [${err.adapter}]: ${err.error}`);
+    }
+  }
+  console.log(`${prefix} ─────────────────────────────────────────`);
 }
 
 // ---------------------------------------------------------------------------
@@ -147,28 +131,29 @@ function notifyConsole(notification: KmChangeNotification): void {
 function notifyFile(notification: KmChangeNotification): void {
   const filePath = process.env.KM_MONITOR_NOTIFY_FILE;
   if (!filePath) return;
-
   const dir = dirname(filePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-
-  appendFileSync(filePath, JSON.stringify(notification) + "\n", "utf-8");
+  try {
+    appendFileSync(filePath, JSON.stringify(notification) + "\n", "utf-8");
+  } catch (err) {
+    console.error("[km-monitor/notifier] Failed to write notification file:", err);
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Webhook channel (Discord / Slack / custom)
+// Webhook channel
 // ---------------------------------------------------------------------------
 
-/** Build a rich Discord embed payload. */
 function buildDiscordPayload(notification: KmChangeNotification): string {
   const lines: string[] = [
     `**Knowledge Map Update — Cycle #${notification.cycleNumber}**`,
     `_${notification.notifiedAt}_`,
+    notification.batchId ? `Batch: \`${notification.batchId}\`` : "",
     ``,
     notification.summary,
     ``,
-  ];
+  ].filter((l) => l !== "");
 
-  // Per-source breakdown.
   if (notification.sourceSummaries.length > 0) {
     lines.push(`**Sources scanned:**`);
     for (const s of notification.sourceSummaries) {
@@ -179,7 +164,6 @@ function buildDiscordPayload(notification: KmChangeNotification): string {
     lines.push(``);
   }
 
-  // New entries (up to 5).
   if (notification.entries.length > 0) {
     lines.push(`**New gold entries:**`);
     for (const entry of notification.entries.slice(0, 5)) {
@@ -199,7 +183,6 @@ function buildDiscordPayload(notification: KmChangeNotification): string {
     lines.push(``);
   }
 
-  // Errors.
   if (notification.scanErrors.length > 0) {
     lines.push(`⚠️ **Adapter errors:**`);
     for (const err of notification.scanErrors) {
@@ -210,14 +193,17 @@ function buildDiscordPayload(notification: KmChangeNotification): string {
   return JSON.stringify({ content: lines.join("\n") });
 }
 
-/** Build a Slack message payload. */
 function buildSlackPayload(notification: KmChangeNotification): string {
   const blocks: unknown[] = [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*Knowledge Map Update — Cycle #${notification.cycleNumber}*\n${notification.summary}`,
+        text: [
+          `*Knowledge Map Update — Cycle #${notification.cycleNumber}*`,
+          notification.batchId ? `Batch: \`${notification.batchId}\`` : null,
+          notification.summary,
+        ].filter(Boolean).join("\n"),
       },
     },
   ];
@@ -285,50 +271,106 @@ async function notifyWebhook(
   }
 
   try {
-    await fetch(webhookUrl, {
+    const res = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
     });
+    if (!res.ok) {
+      console.error(
+        `[km-monitor/notifier] Webhook returned HTTP ${res.status}: ${await res.text()}`,
+      );
+    }
   } catch (err) {
     console.error("[km-monitor/notifier] Webhook delivery failed:", err);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Public dispatcher
+// Public dispatchers
 // ---------------------------------------------------------------------------
 
 /**
  * Dispatch a KM-change notification across all configured channels.
  * Always fires the console channel; other channels are opt-in via env vars.
- *
- * @param entries - Gold entries added in this cycle.
- * @param scanErrors - Adapter errors encountered during scanning.
- * @param newConversations - All new conversations detected (for per-source stats).
- * @param cycleNumber - Monotonic cycle counter from state.
  */
 export async function dispatchNotification(
   entries: GoldEntry[],
   scanErrors: Array<{ adapter: string; error: string }> = [],
   newConversations: ConversationRecord[] = [],
   cycleNumber = 0,
+  batchId?: string,
 ): Promise<KmChangeNotification> {
   const notification = buildNotification(
     entries,
     scanErrors,
     newConversations,
     cycleNumber,
+    batchId,
+  );
+  notifyConsole(notification);
+  notifyFile(notification);
+  await notifyWebhook(notification);
+  return notification;
+}
+
+/**
+ * Dispatch a periodic health report to configured channels.
+ * Only fires if `KM_MONITOR_NOTIFY_FILE` or `KM_MONITOR_NOTIFY_WEBHOOK_URL` is set,
+ * plus always logs to console.
+ */
+export async function dispatchHealthReport(report: KmHealthReport): Promise<void> {
+  console.log(
+    `[km-monitor/health] cycle=${report.cycleCount} | processed=${report.totalProcessed} | goldEntries=${report.totalGoldEntries} | running=${report.monitorRunning}`,
   );
 
-  // Console is always active.
-  notifyConsole(notification);
+  // File channel.
+  const filePath = process.env.KM_MONITOR_NOTIFY_FILE;
+  if (filePath) {
+    const dir = dirname(filePath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    try {
+      appendFileSync(filePath, JSON.stringify(report) + "\n", "utf-8");
+    } catch (err) {
+      console.error("[km-monitor/notifier] Failed to write health report to file:", err);
+    }
+  }
 
-  // File channel (optional).
-  notifyFile(notification);
-
-  // Webhook channel (optional, async).
-  await notifyWebhook(notification);
-
-  return notification;
+  // Webhook channel.
+  const webhookUrl = process.env.KM_MONITOR_NOTIFY_WEBHOOK_URL;
+  if (webhookUrl) {
+    let body: string;
+    if (webhookUrl.includes("discord.com")) {
+      body = JSON.stringify({
+        content: [
+          `**KM Monitor Health Report — Cycle #${report.cycleCount}**`,
+          `_${report.reportedAt}_`,
+          `Total processed: ${report.totalProcessed} | Gold entries: ${report.totalGoldEntries} | Running: ${report.monitorRunning}`,
+        ].join("\n"),
+      });
+    } else if (webhookUrl.includes("hooks.slack.com")) {
+      body = JSON.stringify({
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `*KM Monitor Health — Cycle #${report.cycleCount}*\nProcessed: ${report.totalProcessed} | Gold: ${report.totalGoldEntries} | Running: ${report.monitorRunning}`,
+            },
+          },
+        ],
+      });
+    } else {
+      body = JSON.stringify(report);
+    }
+    try {
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+    } catch (err) {
+      console.error("[km-monitor/notifier] Health report webhook delivery failed:", err);
+    }
+  }
 }

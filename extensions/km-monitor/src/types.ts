@@ -1,16 +1,15 @@
 /**
- * km-monitor/src/types.ts
+ * km-monitor/src/types.ts  — v1.2.0
  *
  * Shared type definitions for the Knowledge Map Monitor extension.
  * All data flowing through the pipeline is typed here for strict safety.
  *
- * Enhanced in v1.1.0:
- *   - Extended ConversationSource to enumerate all supported LLM interfaces.
- *   - Added SyncRecord to track cross-LLM synchronisation events.
- *   - Added KmAuditEvent for full change-log traceability.
- *   - Extended KmChangeNotification with per-source breakdown and audit trail.
- *   - Extended MonitorState with cycleCount and per-source statistics.
- *   - Extended Provenance with extractionModel and rawConfidence fields.
+ * Changes in v1.2.0:
+ *   - Added "xai-grok", "perplexity", "deepseek" to ConversationSource.
+ *   - Added SyncBatch for multi-conversation batch tracking.
+ *   - Added KmHealthReport for periodic health-check payloads.
+ *   - Added GoldEntryUpdate for future edit/correction events.
+ *   - Provenance now includes `batchId` for batch-level traceability.
  */
 
 // ---------------------------------------------------------------------------
@@ -44,6 +43,9 @@ export type ConversationSource =
   | "mistral"
   | "meta-llama"
   | "cohere"
+  | "xai-grok"
+  | "perplexity"
+  | "deepseek"
   | "openclaw-session"
   | "custom-webhook"
   | string;
@@ -65,6 +67,23 @@ export interface SyncRecord {
   goldExtracted: number;
   /** Whether the sync was a dry run (no writes). */
   dryRun: boolean;
+}
+
+/**
+ * A batch of synchronisation records from a single scan cycle.
+ * Enables batch-level traceability across multiple conversations.
+ */
+export interface SyncBatch {
+  /** Unique batch identifier (UUID v4). */
+  batchId: string;
+  /** Cycle number this batch belongs to. */
+  cycleNumber: number;
+  /** ISO-8601 timestamp when the batch was created. */
+  createdAt: string;
+  /** All sync records in this batch. */
+  records: SyncRecord[];
+  /** Total gold entries extracted across all records. */
+  totalGoldExtracted: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +124,26 @@ export interface Provenance {
   extractionModel?: string;
   /** Optional: raw LLM confidence score before threshold filtering. */
   rawConfidence?: number;
+  /** Optional: batch ID for batch-level traceability. */
+  batchId?: string;
+}
+
+/** A correction or update to an existing GoldEntry (for future edit support). */
+export interface GoldEntryUpdate {
+  /** The ID of the entry being updated. */
+  entryId: string;
+  /** New title (if changed). */
+  title?: string;
+  /** New body (if changed). */
+  body?: string;
+  /** New confidence score (if changed). */
+  confidence?: number;
+  /** New tags (if changed). */
+  tags?: string[];
+  /** ISO-8601 timestamp of the update. */
+  updatedAt: string;
+  /** Reason for the update. */
+  reason: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +160,7 @@ export interface KmAuditEvent {
   /** ISO-8601 timestamp of the event. */
   timestamp: string;
   /** The action performed. */
-  action: "add" | "skip-duplicate" | "skip-low-confidence" | "scan-error";
+  action: "add" | "skip-duplicate" | "skip-low-confidence" | "scan-error" | "update";
   /** ID of the affected GoldEntry (if applicable). */
   entryId?: string;
   /** Title of the affected GoldEntry (if applicable). */
@@ -130,6 +169,8 @@ export interface KmAuditEvent {
   source: ConversationSource;
   /** Conversation ID that triggered the event. */
   conversationId: string;
+  /** Batch ID for batch-level traceability (v1.2.0+). */
+  batchId?: string;
   /** Additional detail for error events. */
   detail?: string;
 }
@@ -166,6 +207,31 @@ export interface KmChangeNotification {
   notifiedAt: string;
   /** Cycle sequence number (monotonically increasing). */
   cycleNumber: number;
+  /** Batch ID for this cycle's sync batch (v1.2.0+). */
+  batchId?: string;
+}
+
+/**
+ * Periodic health report dispatched by the monitor (v1.2.0+).
+ * Sent even when no new entries are found, to confirm the monitor is alive.
+ */
+export interface KmHealthReport {
+  /** Type discriminator. */
+  kind: "km-health";
+  /** ISO-8601 timestamp. */
+  reportedAt: string;
+  /** Current cycle count. */
+  cycleCount: number;
+  /** Total conversations processed since inception. */
+  totalProcessed: number;
+  /** Total gold entries in the KM. */
+  totalGoldEntries: number;
+  /** Per-source statistics. */
+  sourceStats: Record<string, { processed: number; goldAdded: number }>;
+  /** Whether the monitor is currently running. */
+  monitorRunning: boolean;
+  /** Interval in milliseconds between scan cycles. */
+  intervalMs: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,4 +252,6 @@ export interface MonitorState {
   cycleCount: number;
   /** Per-source statistics for observability. */
   sourceStats: Record<string, { processed: number; goldAdded: number }>;
+  /** Last batch ID for traceability (v1.2.0+). */
+  lastBatchId?: string;
 }

@@ -1,16 +1,14 @@
 /**
- * km-monitor/src/state.ts
+ * km-monitor/src/state.ts  — v1.2.0
  *
  * Lightweight JSON-file-backed state store for the monitor loop.
  * Persists the "last seen" conversation IDs so the agent never re-processes
  * a conversation it has already ingested, even across restarts.
  *
- * Enhanced in v1.1.0:
- *   - Added cycleCount for monotonic cycle numbering.
- *   - Added sourceStats for per-source observability.
+ * Changes in v1.2.0:
+ *   - Added `lastBatchId` to MonitorState for batch-level traceability.
  *   - Backward-compatible loading: merges with defaults for old state files.
  */
-
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { MonitorState } from "./types.js";
@@ -22,13 +20,9 @@ const DEFAULT_STATE: MonitorState = {
   lastScanAt: null,
   cycleCount: 0,
   sourceStats: {},
+  lastBatchId: undefined,
 };
 
-/**
- * Resolve the path to the state file.
- * Defaults to `~/.openclaw/km-monitor/state.json` but can be overridden
- * via the `KM_MONITOR_STATE_PATH` environment variable.
- */
 function resolveStatePath(): string {
   if (process.env.KM_MONITOR_STATE_PATH) {
     return process.env.KM_MONITOR_STATE_PATH;
@@ -46,8 +40,6 @@ export function loadState(): MonitorState {
   try {
     const raw = readFileSync(path, "utf-8");
     const parsed = JSON.parse(raw) as Partial<MonitorState>;
-    // Merge with defaults to handle state files written by older versions
-    // that lack the cycleCount and sourceStats fields.
     return {
       ...DEFAULT_STATE,
       ...parsed,

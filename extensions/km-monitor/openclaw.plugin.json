@@ -2,9 +2,10 @@
   "id": "km-monitor",
   "name": "Knowledge Map Monitor",
   "description": "Continuously monitors LLM interfaces for new conversations, synchronizes data points, enriches the Knowledge Map with verified 'gold' information, and dispatches traceable notifications.",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "kind": "extension",
   "author": "PopUpEmpire / OpenClaw",
   "homepage": "https://github.com/popupempire/openclaw-wtf",
-  "entrypoint": "index.ts"
+  "entrypoint": "index.ts",
+  "skills": ["./SKILL.md"]
 }

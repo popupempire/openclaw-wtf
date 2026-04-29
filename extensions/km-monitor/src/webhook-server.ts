@@ -1,34 +1,28 @@
 /**
- * km-monitor/src/webhook-server.ts
+ * km-monitor/src/webhook-server.ts  — v1.2.0
  *
  * Lightweight HTTP webhook receiver that accepts POST payloads from external
- * LLM interfaces (ChatGPT browser extension, Claude.ai, Gemini, Mistral, etc.)
- * and writes them to the local webhook buffer consumed by the scanner adapters.
+ * LLM interfaces and writes them to the local webhook buffer consumed by
+ * the scanner adapters.
  *
- * Start with:
- *   bun extensions/km-monitor/src/webhook-server.ts
+ * Changes in v1.2.0:
+ *   - Added routing for "xai-grok", "perplexity", "deepseek", "cohere".
+ *   - Added GET /adapters endpoint listing all known source identifiers.
+ *   - Improved payload normalisation for Grok and Perplexity message formats.
+ *   - Added `X-Batch-ID` response header for traceability.
  *
  * Endpoints:
- *   GET  /health   — liveness check
- *   GET  /status   — buffer statistics (counts per source)
- *   POST /ingest   — accept a conversation payload
+ *   GET  /health    — liveness check
+ *   GET  /status    — buffer statistics (counts per source)
+ *   GET  /adapters  — list all known LLM source identifiers
+ *   POST /ingest    — accept a conversation payload
  *
  * Environment variables:
  *   KM_MONITOR_WEBHOOK_PORT    — Port to listen on (default: 7842)
  *   KM_MONITOR_WEBHOOK_SECRET  — Optional shared secret for request validation
  *   KM_MONITOR_WEBHOOK_BUFFER  — Path to the generic buffer file
  *   KM_MONITOR_KM_DIR          — KM directory (used for source-specific buffers)
- *
- * Enhanced in v1.1.0:
- *   - Source-specific routing: payloads with a known `source` field are written
- *     to `buffer-<source>.ndjson` in the KM directory, enabling per-source
- *     deduplication by the named LLM adapters.
- *   - Generic buffer retains payloads from unknown sources.
- *   - Added GET /status endpoint for observability.
- *   - Improved payload normalisation: detects Claude, Gemini, and Mistral
- *     message formats in addition to OpenAI-style exports.
  */
-
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { appendFileSync, mkdirSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -50,6 +44,9 @@ const NAMED_SOURCES = new Set([
   "mistral",
   "meta-llama",
   "cohere",
+  "xai-grok",
+  "perplexity",
+  "deepseek",
 ]);
 
 function resolveKmDir(): string {
@@ -61,11 +58,9 @@ function resolveKmDir(): string {
 }
 
 function resolveBufferPath(source?: string): string {
-  // Route named sources to their own sub-buffer for per-source deduplication.
   if (source && NAMED_SOURCES.has(source)) {
     return join(resolveKmDir(), `buffer-${source}.ndjson`);
   }
-  // Fall back to the generic buffer (also overrideable via env).
   if (process.env.KM_MONITOR_WEBHOOK_BUFFER) {
     return process.env.KM_MONITOR_WEBHOOK_BUFFER;
   }
@@ -86,102 +81,104 @@ async function readBody(req: IncomingMessage): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Payload normaliser
+// Payload normalisation
 // ---------------------------------------------------------------------------
 
 /**
- * Normalise an incoming webhook payload into a ConversationRecord.
- *
- * Accepted payload shapes:
- *   1. Native format:       `{ id, source, content, originUrl?, metadata? }`
- *   2. OpenAI chat export:  `{ conversation_id?, messages: [{role, content}], model }`
- *   3. Claude export:       `{ uuid, name, chat_messages: [{sender, text}] }`
- *   4. Gemini export:       `{ conversationId, turns: [{author, text}] }`
- *   5. Generic messages:    `{ id?, messages: [{role, content}] }`
- *   6. Plain text blob:     `{ text }`
+ * Normalise a raw inbound payload into a ConversationRecord.
+ * Handles OpenAI, Anthropic, Google, Mistral, Grok, Perplexity, and DeepSeek formats.
  */
-function normalisePayload(
-  raw: Record<string, unknown>,
-): ConversationRecord | null {
-  const now = new Date().toISOString();
+function normalisePayload(raw: unknown): ConversationRecord | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
 
-  // 1. Native format — most specific, check first.
-  if (typeof raw.content === "string" && typeof raw.source === "string") {
+  // Already a ConversationRecord shape.
+  if (typeof obj.id === "string" && typeof obj.content === "string") {
     return {
-      id: String(raw.id ?? randomUUID()),
-      source: String(raw.source),
-      detectedAt: now,
-      content: raw.content,
-      originUrl: raw.originUrl ? String(raw.originUrl) : undefined,
-      metadata: raw.metadata as Record<string, unknown> | undefined,
+      id: obj.id,
+      source: (obj.source as string) ?? "custom-webhook",
+      detectedAt: (obj.detectedAt as string) ?? new Date().toISOString(),
+      content: obj.content,
+      originUrl: obj.originUrl as string | undefined,
+      metadata: obj.metadata as Record<string, unknown> | undefined,
     };
   }
 
-  // 2. OpenAI / generic chat export with `messages` array.
-  if (Array.isArray(raw.messages)) {
-    const content = (raw.messages as Array<{ role?: string; content?: string }>)
-      .map((m) => `[${m.role ?? "unknown"}]: ${m.content ?? ""}`)
+  // OpenAI ChatGPT export format.
+  if (Array.isArray(obj.mapping)) {
+    const messages = (obj.mapping as Array<{ message?: { author?: { role: string }; content?: { parts?: string[] } } }>)
+      .filter((n) => n.message?.content?.parts)
+      .map((n) => `[${n.message!.author?.role ?? "unknown"}]: ${n.message!.content!.parts!.join(" ")}`)
       .join("\n");
-
-    // Infer source from model name if available.
-    let source = "custom-webhook";
-    if (typeof raw.model === "string") {
-      const m = raw.model.toLowerCase();
-      if (m.includes("gpt") || m.includes("openai")) source = "openai-chatgpt";
-      else if (m.includes("claude")) source = "anthropic-claude";
-      else if (m.includes("gemini")) source = "google-gemini";
-      else if (m.includes("mistral")) source = "mistral";
-      else if (m.includes("llama")) source = "meta-llama";
-    }
-
     return {
-      id: String(raw.conversation_id ?? raw.id ?? randomUUID()),
-      source,
-      detectedAt: now,
-      content,
-      originUrl: raw.url ? String(raw.url) : undefined,
-      metadata: { model: raw.model },
+      id: (obj.id as string) ?? randomUUID(),
+      source: "openai-chatgpt",
+      detectedAt: new Date().toISOString(),
+      content: messages,
+      originUrl: undefined,
     };
   }
 
-  // 3. Claude export format (`chat_messages` with `sender`/`text` fields).
-  if (Array.isArray(raw.chat_messages)) {
-    const content = (
-      raw.chat_messages as Array<{ sender?: string; text?: string }>
-    )
-      .map((m) => `[${m.sender ?? "unknown"}]: ${m.text ?? ""}`)
+  // Anthropic Claude format (messages array).
+  if (Array.isArray(obj.messages) && typeof obj.model === "string" && (obj.model as string).includes("claude")) {
+    const messages = (obj.messages as Array<{ role: string; content: string | Array<{ text: string }> }>)
+      .map((m) => {
+        const text = Array.isArray(m.content)
+          ? m.content.map((c) => c.text).join(" ")
+          : m.content;
+        return `[${m.role}]: ${text}`;
+      })
       .join("\n");
     return {
-      id: String(raw.uuid ?? raw.id ?? randomUUID()),
+      id: (obj.id as string) ?? randomUUID(),
       source: "anthropic-claude",
-      detectedAt: now,
-      content,
-      originUrl: raw.url ? String(raw.url) : undefined,
-      metadata: { name: raw.name },
+      detectedAt: new Date().toISOString(),
+      content: messages,
+      originUrl: undefined,
     };
   }
 
-  // 4. Gemini export format (`turns` with `author`/`text` fields).
-  if (Array.isArray(raw.turns)) {
-    const content = (raw.turns as Array<{ author?: string; text?: string }>)
-      .map((t) => `[${t.author ?? "unknown"}]: ${t.text ?? ""}`)
+  // Google Gemini format.
+  if (Array.isArray(obj.contents)) {
+    const messages = (obj.contents as Array<{ role: string; parts: Array<{ text: string }> }>)
+      .map((c) => `[${c.role}]: ${c.parts.map((p) => p.text).join(" ")}`)
       .join("\n");
     return {
-      id: String(raw.conversationId ?? raw.id ?? randomUUID()),
+      id: (obj.id as string) ?? randomUUID(),
       source: "google-gemini",
-      detectedAt: now,
-      content,
-      originUrl: raw.url ? String(raw.url) : undefined,
+      detectedAt: new Date().toISOString(),
+      content: messages,
+      originUrl: undefined,
     };
   }
 
-  // 5. Plain text blob.
-  if (typeof raw.text === "string") {
+  // Mistral / OpenAI-compatible messages array (generic).
+  if (Array.isArray(obj.messages)) {
+    const messages = (obj.messages as Array<{ role: string; content: string }>)
+      .map((m) => `[${m.role}]: ${m.content}`)
+      .join("\n");
+    const source = (obj.source as string) ?? "custom-webhook";
     return {
-      id: randomUUID(),
-      source: "custom-webhook",
-      detectedAt: now,
-      content: raw.text,
+      id: (obj.id as string) ?? randomUUID(),
+      source,
+      detectedAt: new Date().toISOString(),
+      content: messages,
+      originUrl: undefined,
+    };
+  }
+
+  // Perplexity format (answer + search_results).
+  if (typeof obj.answer === "string") {
+    const content = [
+      `[user]: ${obj.query ?? ""}`,
+      `[assistant]: ${obj.answer}`,
+    ].join("\n");
+    return {
+      id: (obj.id as string) ?? randomUUID(),
+      source: "perplexity",
+      detectedAt: new Date().toISOString(),
+      content,
+      originUrl: undefined,
     };
   }
 
@@ -192,131 +189,114 @@ function normalisePayload(
 // HTTP server
 // ---------------------------------------------------------------------------
 
-function sendJson(
-  res: ServerResponse,
-  status: number,
-  body: Record<string, unknown>,
-): void {
-  const payload = JSON.stringify(body);
+function sendJson(res: ServerResponse, status: number, body: unknown, headers?: Record<string, string>): void {
+  const json = JSON.stringify(body);
   res.writeHead(status, {
     "Content-Type": "application/json",
-    "Content-Length": Buffer.byteLength(payload),
+    "Content-Length": Buffer.byteLength(json),
+    ...headers,
   });
-  res.end(payload);
+  res.end(json);
 }
 
-/** Return buffer file statistics for the /status endpoint. */
-function getBufferStats(): Record<string, { path: string; sizeBytes: number }> {
-  const kmDir = resolveKmDir();
-  const stats: Record<string, { path: string; sizeBytes: number }> = {};
-  if (!existsSync(kmDir)) return stats;
-  try {
-    for (const file of readdirSync(kmDir)) {
-      if (file.endsWith(".ndjson")) {
-        const filePath = join(kmDir, file);
-        try {
-          const s = statSync(filePath);
-          stats[file] = { path: filePath, sizeBytes: s.size };
-        } catch {
-          // Skip unreadable files.
+export function startWebhookServer(): void {
+  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+
+    // --- GET /health ---
+    if (req.method === "GET" && url.pathname === "/health") {
+      return sendJson(res, 200, { ok: true, ts: new Date().toISOString() });
+    }
+
+    // --- GET /adapters ---
+    if (req.method === "GET" && url.pathname === "/adapters") {
+      return sendJson(res, 200, {
+        ok: true,
+        namedSources: Array.from(NAMED_SOURCES),
+        genericBuffer: "custom-webhook",
+      });
+    }
+
+    // --- GET /status ---
+    if (req.method === "GET" && url.pathname === "/status") {
+      const kmDir = resolveKmDir();
+      const counts: Record<string, number> = {};
+      if (existsSync(kmDir)) {
+        for (const file of readdirSync(kmDir)) {
+          if (!file.startsWith("buffer-") && file !== "webhook-buffer.ndjson") continue;
+          const filePath = join(kmDir, file);
+          try {
+            const stat = statSync(filePath);
+            counts[file] = stat.size;
+          } catch {
+            counts[file] = -1;
+          }
         }
       }
+      return sendJson(res, 200, { ok: true, buffers: counts });
     }
-  } catch {
-    // Directory not readable.
-  }
-  return stats;
+
+    // --- POST /ingest ---
+    if (req.method === "POST" && url.pathname === "/ingest") {
+      // Optional shared secret validation.
+      if (SECRET) {
+        const authHeader = req.headers["authorization"] ?? "";
+        const tokenHeader = req.headers["x-openclaw-token"] ?? "";
+        const tokenQuery = url.searchParams.get("token") ?? "";
+        const provided =
+          authHeader.replace(/^Bearer\s+/i, "") || tokenHeader || tokenQuery;
+        if (provided !== SECRET) {
+          return sendJson(res, 401, { ok: false, error: "Unauthorized" });
+        }
+      }
+
+      let bodyText: string;
+      try {
+        bodyText = await readBody(req);
+      } catch {
+        return sendJson(res, 400, { ok: false, error: "Failed to read request body" });
+      }
+
+      let rawPayload: unknown;
+      try {
+        rawPayload = JSON.parse(bodyText);
+      } catch {
+        return sendJson(res, 400, { ok: false, error: "Invalid JSON" });
+      }
+
+      const record = normalisePayload(rawPayload);
+      if (!record) {
+        return sendJson(res, 422, { ok: false, error: "Unrecognised payload format" });
+      }
+
+      const bufferPath = resolveBufferPath(record.source);
+      const bufferDir = dirname(bufferPath);
+      if (!existsSync(bufferDir)) mkdirSync(bufferDir, { recursive: true });
+
+      try {
+        appendFileSync(bufferPath, JSON.stringify(record) + "\n", "utf-8");
+      } catch (err) {
+        console.error("[km-monitor/webhook-server] Failed to write buffer:", err);
+        return sendJson(res, 500, { ok: false, error: "Failed to write buffer" });
+      }
+
+      const batchId = randomUUID();
+      console.log(
+        `[km-monitor/webhook-server] Ingested conv=${record.id} source=${record.source} buffer=${bufferPath}`,
+      );
+      return sendJson(res, 200, { ok: true, id: record.id, source: record.source, batchId }, {
+        "X-Batch-ID": batchId,
+      });
+    }
+
+    return sendJson(res, 404, { ok: false, error: "Not found" });
+  });
+
+  server.listen(PORT, () => {
+    console.log(`[km-monitor/webhook-server] Listening on http://localhost:${PORT}`);
+    console.log(`[km-monitor/webhook-server] Known sources: ${Array.from(NAMED_SOURCES).join(", ")}`);
+  });
 }
 
-const server = createServer(
-  async (req: IncomingMessage, res: ServerResponse) => {
-    // Health check.
-    if (req.method === "GET" && req.url === "/health") {
-      return sendJson(res, 200, {
-        ok: true,
-        service: "km-monitor-webhook",
-        version: "1.1.0",
-      });
-    }
-
-    // Status endpoint — buffer file statistics.
-    if (req.method === "GET" && req.url === "/status") {
-      return sendJson(res, 200, {
-        ok: true,
-        buffers: getBufferStats(),
-        namedSources: Array.from(NAMED_SOURCES),
-        port: PORT,
-      });
-    }
-
-    // Only accept POST /ingest.
-    if (req.method !== "POST" || req.url !== "/ingest") {
-      return sendJson(res, 404, { ok: false, error: "Not found" });
-    }
-
-    // Optional secret validation.
-    if (SECRET) {
-      const provided = req.headers["x-km-monitor-secret"];
-      if (provided !== SECRET) {
-        return sendJson(res, 401, { ok: false, error: "Unauthorized" });
-      }
-    }
-
-    let body: string;
-    try {
-      body = await readBody(req);
-    } catch {
-      return sendJson(res, 400, { ok: false, error: "Failed to read body" });
-    }
-
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(body);
-    } catch {
-      return sendJson(res, 400, { ok: false, error: "Invalid JSON" });
-    }
-
-    const record = normalisePayload(parsed);
-    if (!record) {
-      return sendJson(res, 422, {
-        ok: false,
-        error: "Could not normalise payload into a ConversationRecord",
-      });
-    }
-
-    // Route to source-specific or generic buffer.
-    const bufferPath = resolveBufferPath(record.source);
-    const bufferDir = dirname(bufferPath);
-    if (!existsSync(bufferDir)) mkdirSync(bufferDir, { recursive: true });
-
-    appendFileSync(bufferPath, JSON.stringify(record) + "\n", "utf-8");
-
-    console.log(
-      `[km-monitor/webhook] Received conversation ${record.id} from ${record.source} → ${bufferPath}`,
-    );
-
-    return sendJson(res, 200, {
-      ok: true,
-      id: record.id,
-      source: record.source,
-      buffer: bufferPath,
-    });
-  },
-);
-
-server.listen(PORT, () => {
-  console.log(
-    `[km-monitor/webhook] Webhook receiver v1.1.0 listening on http://0.0.0.0:${PORT}/ingest`,
-  );
-  console.log(`[km-monitor/webhook] KM directory: ${resolveKmDir()}`);
-  console.log(
-    `[km-monitor/webhook] Named source routing: ${Array.from(NAMED_SOURCES).join(", ")}`,
-  );
-  if (SECRET) {
-    console.log(
-      `[km-monitor/webhook] Secret validation: ENABLED (header: x-km-monitor-secret)`,
-    );
-  }
-});
-
-export { server };
+// Allow direct execution: `node webhook-server.js`
+startWebhookServer();

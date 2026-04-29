@@ -1,79 +1,64 @@
 /**
- * km-monitor/src/extractor.ts
+ * km-monitor/src/extractor.ts  — v1.2.0
  *
- * Gold Extractor — uses an LLM to analyse a raw conversation and extract
- * high-quality, verified "gold" insights for the Knowledge Map.
+ * Gold Extractor — uses an LLM to identify high-quality, verified insights
+ * ("gold") from raw LLM conversation transcripts and formats them as
+ * typed GoldEntry objects with full provenance metadata.
  *
- * The extractor calls the OpenAI-compatible API (pre-configured in the
- * sandbox via `OPENAI_API_KEY`) with a structured extraction prompt and
- * parses the response into typed `GoldEntry` objects.
- *
- * Enhanced in v1.1.0:
- *   - Refined SYSTEM_PROMPT to emphasise factual accuracy, verifiability,
- *     and relevance — ensuring only genuine "gold" enters the KM.
- *   - Added `extractionModel` and `rawConfidence` to Provenance for full
- *     traceability of the extraction pipeline step.
- *   - Each GoldEntry now receives its own unique Provenance object (not shared).
- *   - Added `KM_MONITOR_EXTRACTION_MODEL` env var to override the model.
- *   - Improved JSON parsing with a more robust regex-based fence stripper.
+ * Changes in v1.2.0:
+ *   - `extractGoldEntries()` now accepts an optional `batchId` parameter
+ *     and stamps it into each entry's Provenance for batch-level traceability.
+ *   - Added retry logic (up to 2 attempts) for transient LLM API errors.
+ *   - Improved JSON fence stripping to handle more LLM output formats.
+ *   - Extractor version bumped to 1.2.0 in `extractedBy` field.
  */
-
 import { randomUUID } from "node:crypto";
+import OpenAI from "openai";
 import type { ConversationRecord, GoldEntry, Provenance } from "./types.js";
 
 // ---------------------------------------------------------------------------
-// LLM Client (OpenAI-compatible)
+// LLM client
 // ---------------------------------------------------------------------------
 
-interface LlmMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
-}
-
-interface LlmChoice {
-  message: { content: string };
-}
-
-interface LlmResponse {
-  choices: LlmChoice[];
-}
-
-/** Resolve the extraction model name from env or use the default. */
 function getExtractionModel(): string {
   return process.env.KM_MONITOR_EXTRACTION_MODEL ?? "gpt-4.1-mini";
 }
 
-async function callLlm(messages: LlmMessage[]): Promise<string> {
-  // Dynamically import to avoid hard dep at module load time.
-  const { default: OpenAI } = await import("openai");
-  const client = new OpenAI();
-  const model = getExtractionModel();
-  const response = (await client.chat.completions.create({
-    model,
-    messages,
-    temperature: 0.1, // Lower temperature for more deterministic, factual extraction
-    max_tokens: 4096,
-  })) as LlmResponse;
-  return response.choices[0]?.message?.content ?? "";
+const client = new OpenAI();
+
+async function callLlm(
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  retries = 2,
+): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await client.chat.completions.create({
+        model: getExtractionModel(),
+        messages,
+        temperature: 0.1,
+        max_tokens: 4096,
+      });
+      return response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      lastError = err;
+      if (attempt < retries) {
+        const delay = 1000 * (attempt + 1);
+        console.warn(
+          `[km-monitor/extractor] LLM call failed (attempt ${attempt + 1}/${retries + 1}), retrying in ${delay}ms…`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+  throw lastError;
 }
 
 // ---------------------------------------------------------------------------
-// Extraction Prompt
+// System prompt
 // ---------------------------------------------------------------------------
 
-/**
- * System prompt for the gold extractor.
- *
- * Design principles:
- *   1. Emphasise factual accuracy and verifiability — only extract claims
- *      that are clearly supported by the conversation content.
- *   2. Require self-contained statements — each insight must be understandable
- *      without reference to the original conversation.
- *   3. Demand high specificity — prefer precise, actionable insights over
- *      vague generalisations.
- *   4. Enforce strict JSON output — no prose outside the array.
- */
-const SYSTEM_PROMPT = `You are a Knowledge Map curator for a multi-LLM intelligence system. Your task is to read a conversation between a user and one or more AI assistants and extract high-quality, verified "gold" insights that are worth preserving in a long-term knowledge base.
+const SYSTEM_PROMPT = `You are a Knowledge Map curator. Your task is to read a conversation transcript from an AI assistant interface and extract high-quality, verified "gold" insights that are worth preserving in a long-term knowledge base.
 
 SELECTION CRITERIA — only extract an insight if ALL of the following are true:
 1. It is factually accurate and verifiable based on the conversation content.
@@ -114,15 +99,18 @@ export interface ExtractionResult {
 /**
  * Extract gold entries from a single conversation record.
  *
- * @param record - The conversation to analyse.
- * @param confidenceThreshold - Minimum confidence score to accept an entry (default 0.6).
+ * @param record               - The conversation to analyse.
+ * @param confidenceThreshold  - Minimum confidence score to accept an entry (default 0.6).
+ * @param batchId              - Optional batch ID for batch-level traceability.
  */
 export async function extractGoldEntries(
   record: ConversationRecord,
   confidenceThreshold = 0.6,
+  batchId?: string,
 ): Promise<ExtractionResult> {
   const model = getExtractionModel();
   const sourceLabel = record.source ?? "unknown";
+
   const userPrompt = [
     `Source: ${sourceLabel}`,
     record.originUrl ? `URL: ${record.originUrl}` : null,
@@ -158,17 +146,16 @@ export async function extractGoldEntries(
     confidence: number;
     tags: string[];
   }> = [];
-
   try {
     const cleaned = rawText
-      .replace(/^```(?:json)?\s*/m, "")
+      .replace(/^```(?:json|JSON)?\s*/m, "")
       .replace(/\s*```\s*$/m, "")
       .trim();
     candidates = JSON.parse(cleaned);
     if (!Array.isArray(candidates)) candidates = [];
   } catch {
     console.warn(
-      `[km-monitor/extractor] Failed to parse LLM JSON for conversation ${record.id}. Raw:\n${rawText}`,
+      `[km-monitor/extractor] Failed to parse LLM JSON for conversation ${record.id}. Raw:\n${rawText.slice(0, 300)}`,
     );
     return { entries: [], rawCandidateCount: 0, rejectedCount: 0, model };
   }
@@ -181,21 +168,20 @@ export async function extractGoldEntries(
   for (const candidate of candidates) {
     const rawConfidence =
       typeof candidate.confidence === "number" ? candidate.confidence : -1;
-
     if (rawConfidence < confidenceThreshold) {
       rejectedCount++;
       continue;
     }
 
-    // Each entry gets its own Provenance object with per-entry rawConfidence.
     const provenance: Provenance = {
       conversationId: record.id,
       source: record.source,
       originUrl: record.originUrl,
-      extractedBy: "km-monitor/extractor@1.1.0",
+      extractedBy: "km-monitor/extractor@1.2.0",
       extractedAt: now,
       extractionModel: model,
       rawConfidence,
+      batchId,
     };
 
     entries.push({

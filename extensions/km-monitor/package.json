@@ -1,17 +1,22 @@
 {
   "name": "@openclaw/km-monitor",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Autonomous LLM conversation monitor, Knowledge Map enrichment pipeline, and notification system for OpenClaw",
   "type": "module",
   "main": "index.ts",
   "scripts": {
-    "build": "tsc --noEmit"
+    "build": "tsc --noEmit",
+    "webhook-server": "node --loader ts-node/esm src/webhook-server.ts",
+    "scan": "node --loader ts-node/esm src/cli-runner.ts scan",
+    "start": "node --loader ts-node/esm src/cli-runner.ts start",
+    "health": "node --loader ts-node/esm src/cli-runner.ts health"
   },
   "peerDependencies": {
     "openclaw": "*"
   },
   "devDependencies": {
-    "openclaw": "*"
+    "openclaw": "*",
+    "typescript": "^5.0.0"
   },
   "dependencies": {
     "openai": "^4.0.0",
