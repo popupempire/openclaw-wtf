@@ -1110,6 +1110,7 @@
           "platforms/macos",
           "platforms/macos-vm",
           "platforms/ios",
+          "platforms/ios-development",
           "platforms/android",
           "platforms/windows",
           "platforms/linux",

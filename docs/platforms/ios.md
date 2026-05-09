@@ -105,8 +105,13 @@ If you want to use OpenClaw CLI commands from your iOS device (using Blink Shell
 
 This is separate from the iOS app—it's about running OpenClaw commands via SSH from your iPhone/iPad to a remote server.
 
+## Building from Source
+
+For developers who want to build the iOS app from source, see the [iOS Development Setup Guide](/platforms/ios-development).
+
 ## Related docs
 
+- [iOS Development Setup](/platforms/ios-development) - Build, test, and develop the iOS app
 - [Blink Shell](/platforms/blink-shell) - CLI access from iOS via SSH
 - [Pairing](/gateway/pairing)
 - [Discovery](/gateway/discovery)
