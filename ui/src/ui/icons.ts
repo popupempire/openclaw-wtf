@@ -10,6 +10,13 @@ export const icons = {
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   `,
+  camera: html`
+    <svg viewBox="0 0 24 24">
+      <path d="M14.5 6H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5.5" />
+      <path d="M9 6 10.5 4h3L15 6" />
+      <circle cx="12" cy="13" r="3.5" />
+    </svg>
+  `,
   barChart: html`
     <svg viewBox="0 0 24 24">
       <line x1="12" x2="12" y1="20" y2="10" />
