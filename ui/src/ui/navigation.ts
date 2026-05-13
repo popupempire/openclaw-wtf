@@ -4,7 +4,7 @@ export const TAB_GROUPS = [
   { label: "Chat", tabs: ["chat"] },
   {
     label: "Control",
-    tabs: ["overview", "channels", "instances", "sessions", "cron"],
+    tabs: ["overview", "channels", "instances", "sessions", "cron", "downsize"],
   },
   { label: "Agent", tabs: ["skills", "nodes"] },
   { label: "Settings", tabs: ["config", "debug", "logs"] },
@@ -16,6 +16,7 @@ export type Tab =
   | "instances"
   | "sessions"
   | "cron"
+  | "downsize"
   | "skills"
   | "nodes"
   | "chat"
@@ -29,6 +30,7 @@ const TAB_PATHS: Record<Tab, string> = {
   instances: "/instances",
   sessions: "/sessions",
   cron: "/cron",
+  downsize: "/downsize",
   skills: "/skills",
   nodes: "/nodes",
   chat: "/chat",
@@ -132,6 +134,8 @@ export function iconForTab(tab: Tab): IconName {
       return "fileText";
     case "cron":
       return "loader";
+    case "downsize":
+      return "camera";
     case "skills":
       return "zap";
     case "nodes":
@@ -159,6 +163,8 @@ export function titleForTab(tab: Tab) {
       return "Sessions";
     case "cron":
       return "Cron Jobs";
+    case "downsize":
+      return "Downsize";
     case "skills":
       return "Skills";
     case "nodes":
@@ -188,6 +194,8 @@ export function subtitleForTab(tab: Tab) {
       return "Inspect active sessions and adjust per-session defaults.";
     case "cron":
       return "Schedule wakeups and recurring agent runs.";
+    case "downsize":
+      return "Point, shoot, and export a clean CSV for listings.";
     case "skills":
       return "Manage skill availability and API key injection.";
     case "nodes":

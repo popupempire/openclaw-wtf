@@ -52,6 +52,7 @@ import { renderChat } from "./views/chat";
 import { renderConfig } from "./views/config";
 import { renderCron } from "./views/cron";
 import { renderDebug } from "./views/debug";
+import { renderDownsize } from "./views/downsize";
 import { renderExecApprovalPrompt } from "./views/exec-approval";
 import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation";
 import { renderInstances } from "./views/instances";
@@ -316,6 +317,8 @@ export function renderApp(state: AppViewState) {
               })
             : nothing
         }
+
+        ${state.tab === "downsize" ? renderDownsize() : nothing}
 
         ${
           state.tab === "skills"
