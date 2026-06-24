@@ -479,7 +479,7 @@ final class NodeAppModel {
         }
     }
 
-    private func sendAgentRequest(link: AgentDeepLink) async throws {
+    func sendAgentRequest(link: AgentDeepLink) async throws {
         if link.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw NSError(domain: "DeepLink", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "invalid agent message",
