@@ -148,7 +148,7 @@ final class TaskAssistantModel {
               evt.stream == "assistant",
               let text = evt.data["text"]?.value as? String
         else { return }
-        task.streamingText = text
+        task.streamingText = (task.streamingText ?? "") + text
     }
 }
 
