@@ -114,45 +114,41 @@ final class TaskAssistantModel {
 
         guard task.status == .running || task.status == .pending else { return }
 
-        let state = evt.state ?? ""
-
-        if state == "done" {
-            // Extract final reply text from message payload.
-            let replyText: String? = {
-                guard let msg = evt.message else { return nil }
-                if let dict = msg.value as? [String: Any],
-                   let content = dict["content"]
-                {
-                    if let str = content as? String { return str }
-                    if let arr = content as? [[String: Any]] {
-                        return arr.compactMap { $0["text"] as? String }.joined(separator: "\n")
-                    }
-                }
-                if let str = msg.value as? String { return str }
-                return nil
-            }()
-            task.result = replyText
+        switch evt.state {
+        case "final":
+            // Capture any text that was streamed in via agent events before the run finished.
+            task.result = task.streamingText.flatMap { $0.isEmpty ? nil : $0 }
+            task.streamingText = nil
             task.status = .done
-        } else if state == "error" {
+        case "aborted":
+            task.streamingText = nil
+            task.errorMessage = "Aborted"
+            task.status = .failed
+        case "error":
+            task.streamingText = nil
             task.errorMessage = evt.errorMessage ?? "Unknown error"
             task.status = .failed
+        default:
+            break
         }
     }
 
-    /// Capture the runId from the first agent event so we can associate it for debugging/cancellation.
+    /// Stream assistant text from agent events and assign runId to the matching task.
     private func handleAgentEvent(_ evt: OpenClawAgentEventPayload) {
-        // Correlate via the `key` field we embedded in the AgentDeepLink — it comes back as the label.
-        // The gateway puts our `key` into the idempotencyKey or label field.  We instead match via
-        // session key on the chat event, so here we only capture the runId for future use.
-        //
-        // If a task's sessionKey matches and the runId is not yet set, record it.
+        // Assign runId to the matching running task (heuristic: one running task).
         let runId = evt.runId
-        if let task = self.tasks.first(where: { $0.runId == nil && $0.status == .running }) {
-            // Heuristic: if there's only one running task, assign the runId to it.
-            if self.tasks.filter({ $0.status == .running }).count == 1 {
-                task.runId = runId
-            }
+        if let task = self.tasks.first(where: { $0.runId == nil && $0.status == .running }),
+           self.tasks.filter({ $0.status == .running }).count == 1
+        {
+            task.runId = runId
         }
+
+        // Accumulate streaming assistant text so we can capture it on "final".
+        guard let task = self.tasks.first(where: { $0.runId == runId }),
+              evt.stream == "assistant",
+              let text = evt.data["text"]?.value as? String
+        else { return }
+        task.streamingText = text
     }
 }
 

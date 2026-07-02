@@ -20,6 +20,8 @@ final class TaskItem: Identifiable {
     var errorMessage: String?
     /// The runId returned by the gateway when the agent starts.
     var runId: String?
+    /// Accumulates streaming assistant text from agent events; captured into `result` on "final".
+    var streamingText: String?
 
     init(id: String = UUID().uuidString, prompt: String) {
         self.id = id
