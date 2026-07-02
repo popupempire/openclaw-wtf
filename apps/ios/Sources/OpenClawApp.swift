@@ -13,6 +13,8 @@ struct OpenClawApp: App {
         let taskAssistantModel = TaskAssistantModel(appModel: appModel)
         _appModel = State(initialValue: appModel)
         _gatewayController = State(initialValue: GatewayConnectionController(appModel: appModel))
+        _taskAssistantModel = We need to install into a 24/7 environment. And it will be used by iOS app. Give me exact setup code I can use from my phone in app. from info@popupempire.wtf iCloud
+State(initialValue: taskAssistantModel)```suggestion
         _taskAssistantModel = State(initialValue: taskAssistantModel)
     }
 
