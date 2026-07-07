@@ -16,11 +16,13 @@ struct RootCanvas: View {
     private enum PresentedSheet: Identifiable {
         case settings
         case chat
+        case tasks
 
         var id: Int {
             switch self {
             case .settings: 0
             case .chat: 1
+            case .tasks: 2
             }
         }
     }
@@ -39,6 +41,9 @@ struct RootCanvas: View {
                 },
                 openSettings: {
                     self.presentedSheet = .settings
+                },
+                openTasks: {
+                    self.presentedSheet = .tasks
                 })
                 .preferredColorScheme(.dark)
 
@@ -55,6 +60,8 @@ struct RootCanvas: View {
                     gateway: self.appModel.gatewaySession,
                     sessionKey: self.appModel.mainSessionKey,
                     userAccent: self.appModel.seamColor)
+            case .tasks:
+                TasksTab()
             }
         }
         .onAppear { self.updateIdleTimer() }
@@ -133,6 +140,7 @@ private struct CanvasContent: View {
     var cameraHUDKind: NodeAppModel.CameraHUDKind?
     var openChat: () -> Void
     var openSettings: () -> Void
+    var openTasks: () -> Void
 
     private var brightenButtons: Bool { self.systemColorScheme == .light }
 
@@ -145,6 +153,11 @@ private struct CanvasContent: View {
                     self.openChat()
                 }
                 .accessibilityLabel("Chat")
+
+                OverlayButton(systemImage: "list.bullet.clipboard", brighten: self.brightenButtons) {
+                    self.openTasks()
+                }
+                .accessibilityLabel("Tasks")
 
                 if self.talkButtonEnabled {
                     // Talk mode lives on a side bubble so it doesn't get buried in settings.
