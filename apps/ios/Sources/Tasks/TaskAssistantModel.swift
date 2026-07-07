@@ -59,8 +59,27 @@ final class TaskAssistantModel {
 
     func cancelTask(_ item: TaskItem) {
         guard item.status == .pending || item.status == .running else { return }
+        // Optimistically update local state so the UI reflects cancellation immediately.
         item.status = .failed
         item.errorMessage = "Cancelled"
+
+        // If the agent is already running on the gateway, send chat.abort so the run stops.
+        guard let runId = item.runId, let appModel else { return }
+        let sessionKey = "task:\(item.id)"
+        let gateway = appModel.gatewaySession
+        Task {
+            struct AbortParams: Codable {
+                var sessionKey: String
+                var runId: String
+            }
+            do {
+                let data = try JSONEncoder().encode(AbortParams(sessionKey: sessionKey, runId: runId))
+                let json = String(data: data, encoding: .utf8)
+                _ = try await gateway.request(method: "chat.abort", paramsJSON: json, timeoutSeconds: 10)
+            } catch {
+                logger.warning("cancelTask abort failed runId=\(runId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     func clearCompleted() {
