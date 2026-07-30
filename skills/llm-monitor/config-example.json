@@ -1,11 +1,11 @@
 {
-  "_comment": "LLM Monitor v2.0.0 configuration block. Merge this into your ~/.openclaw/config.json",
+  "_comment": "LLM Monitor v3.0.0 configuration block. Merge this into your ~/.openclaw/config.json",
   "llmMonitor": {
     "enabled": true,
     "pollIntervalMinutes": 30,
     "notifyChannel": "telegram",
     "goldThreshold": 0.75,
-    "_comment_goldThreshold": "Composite score threshold (0.0–1.0). Insights below this are skipped. Default: 0.75",
+    "_comment_goldThreshold": "Composite score threshold (0.0-1.0). Insights below this are skipped. Default: 0.75",
     "interfaces": [
       {
         "id": "chatgpt",
@@ -23,7 +23,7 @@
         "kind": "anthropic",
         "apiKey": "${ANTHROPIC_API_KEY}",
         "model": "claude-opus-4-5",
-        "_comment_endpoint": "Required for Anthropic: point to a local proxy or conversation export endpoint.",
+        "_comment_endpoint": "Required for Anthropic: point to a local proxy or conversation export endpoint. The proxy should accept ?since=<ISO>&limit=<N> query parameters.",
         "endpoint": "http://localhost:9090/anthropic/conversations"
       },
       {
@@ -32,7 +32,7 @@
         "kind": "gemini",
         "apiKey": "${GEMINI_API_KEY}",
         "model": "gemini-2.5-flash",
-        "_comment_endpoint": "Required for Gemini: point to a local proxy or conversation export endpoint.",
+        "_comment_endpoint": "Required for Gemini: point to a local proxy or conversation export endpoint. The proxy should accept ?since=<ISO>&limit=<N> query parameters.",
         "endpoint": "http://localhost:9090/gemini/conversations"
       },
       {
